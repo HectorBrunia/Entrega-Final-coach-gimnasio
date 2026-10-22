@@ -189,8 +189,15 @@ class Nodos:
             ejercicio = self._resolver_ejercicio(analisis.ejercicio_con_dolor) or self._ejercicio_en_texto(
                 mensaje
             )
-            if ejercicio in self.catalogo and ejercicio not in excluidos:
-                excluidos.append(ejercicio)
+            if ejercicio in self.catalogo:
+                if ejercicio not in excluidos:
+                    excluidos.append(ejercicio)
+                # Se retira ya de la rutina persistida (antes de la pausa HITL), para que no
+                # se siga sirviendo aunque la pausa nunca se reanude. Idempotente: si ya no
+                # esta, no se guarda otra version. Sin ejercicio identificado no se toca.
+                if rutina is not None and ejercicio in _ids_rutina(rutina):
+                    await self.repo.guardar_rutina(_quitar_ejercicios(rutina, {ejercicio}))
+                    rutina = await self.repo.rutina_actual(uid)
 
         return {
             "perfil": perfil,

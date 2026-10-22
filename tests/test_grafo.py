@@ -305,6 +305,46 @@ async def test_dolor_agudo_por_palabra_clave_pausa_aunque_el_llm_no_lo_marque(se
     assert "PlanPropuesto" not in llm.llamadas
 
 
+async def test_dolor_agudo_retira_el_ejercicio_de_la_rutina_antes_de_la_pausa(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "dolor agudo en el press banca"}, config_hilo(usuario))
+    assert "__interrupt__" in salida
+    # sin reanudar: la rutina persistida ya no lo contiene
+    actual = await repo.rutina_actual(usuario)
+    assert _ids_rutina(actual) == {"sentadilla"}
+    assert actual.version == 2
+
+
+async def test_segunda_deteccion_del_mismo_ejercicio_no_crea_otra_version(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    cfg = config_hilo(usuario)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"}, cfg)
+    # la pausa se abandona y el usuario vuelve a reportar el mismo dolor
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "otra vez pinchazo con press_banca"}, cfg)
+    assert "__interrupt__" in salida
+    assert len(repo.rutinas[usuario]) == 2
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
+
+
+async def test_dolor_sin_ejercicio_identificable_no_toca_la_rutina(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "tengo un dolor agudo"},
+                                 config_hilo(usuario))
+    assert "__interrupt__" in salida
+    assert len(repo.rutinas[usuario]) == 1
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"press_banca", "sentadilla"}
+
+
 async def test_ejercicio_excluido_por_dolor_no_vuelve_a_recomendarse(settings, repo, usuario):
     llm = LLMFalso(estructuradas={
         "AnalisisMensaje": [AnalisisMensaje(dolor_agudo=True, ejercicio_con_dolor="press_banca"),
