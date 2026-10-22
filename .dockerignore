@@ -1,0 +1,14 @@
+.env
+.env.*
+.git
+.superpowers
+.pytest_cache
+.venv
+**/__pycache__
+**/*.pyc
+*.egg-info
+build
+dist
+tests
+evaluacion
+docs

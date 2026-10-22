@@ -1,4 +1,33 @@
 services:
+  api:
+    build: .
+    image: coach-gimnasio-api:0.1.0
+    # Mismo .env que para ejecutar en local; COACH_ENV_FILE permite apuntar a otro archivo.
+    env_file:
+      - ${COACH_ENV_FILE:-.env}
+    # Dentro de la red de compose los servicios se alcanzan por su nombre, no por localhost:
+    # estas variables sustituyen a las del .env solo dentro del contenedor.
+    environment:
+      DATABASE_URL: postgresql+asyncpg://coach:coach@postgres:5432/coach
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+      CATALOGO_PATH: data/catalogo/exercises.json
+      GUIAS_DIR: data/guias
+    ports:
+      - "8000:8000"
+    volumes:
+      - modelos_cache:/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      phoenix:
+        condition: service_started
+
   postgres:
     image: postgres:16
     environment:
@@ -10,6 +39,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coach -d coach"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis/redis-stack:7.4.0-v3
@@ -20,6 +54,11 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   qdrant:
     image: qdrant/qdrant:v1.12.4
@@ -27,6 +66,12 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # la imagen de Qdrant no trae curl ni wget: se consulta /healthz con bash y /dev/tcp
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.0\r\n\r\n' >&3 && grep -q passed <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   phoenix:
     image: arizephoenix/phoenix:version-6.0.0
@@ -42,3 +87,4 @@ volumes:
   qdrant_data:
   redis_data:
   phoenix_data:
+  modelos_cache:
