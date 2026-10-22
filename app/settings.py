@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     phoenix_collector_endpoint: str
     max_reintentos_seguridad: int = 2
     embedding_model: str
+    bm25_idioma: str = "spanish"
 
 
 @lru_cache

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance,
+    Modifier,
     PayloadSchemaType,
     PointStruct,
     SparseVectorParams,
@@ -18,7 +19,7 @@ from app.rag.codificadores import (
     CodificadorDisperso,
     cliente_desde_settings,
     denso_desde_settings,
-    disperso_por_defecto,
+    disperso_desde_settings,
     en_hilo,
 )
 from app.settings import Settings
@@ -60,7 +61,7 @@ async def asegurar_coleccion(cliente: AsyncQdrantClient, nombre: str, dim: int) 
             await cliente.create_collection(
                 nombre,
                 vectors_config={VECTOR_DENSO: VectorParams(size=dim, distance=Distance.COSINE)},
-                sparse_vectors_config={VECTOR_DISPERSO: SparseVectorParams()},
+                sparse_vectors_config={VECTOR_DISPERSO: SparseVectorParams(modifier=Modifier.IDF)},
             )
         except Exception:
             # carrera con otro proceso: si ya existe, es exito
@@ -85,7 +86,7 @@ async def ingerir(
     propio = cliente is None
     cliente = cliente or cliente_desde_settings(settings)
     denso = denso or denso_desde_settings(settings)
-    disperso = disperso or disperso_por_defecto()
+    disperso = disperso or disperso_desde_settings(settings)
     try:
         textos = [d.texto for d in documentos]
         vec_densos = await en_hilo(denso.codificar, textos)

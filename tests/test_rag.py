@@ -53,3 +53,26 @@ async def test_busqueda_hibrida_recupera_coincidencia_solo_lexica(cliente_qdrant
     await ingerir(docs, settings_rag, **inj)
     res = await buscar("zancada", SIN_FILTROS, k=2, settings=settings_rag, **inj)
     assert "obj" in [d.id for d in res]
+
+
+async def test_coleccion_usa_modificador_idf_en_vector_disperso(cliente_qdrant, settings_rag, coleccion_prueba):
+    from qdrant_client.models import Modifier
+
+    info = await cliente_qdrant.get_collection(settings_rag.qdrant_collection)
+    assert info.config.params.sparse_vectors["disperso"].modifier == Modifier.IDF
+
+
+def test_codificador_disperso_recibe_idioma_de_settings(settings_rag, monkeypatch):
+    from app.rag import codificadores
+
+    recibidos = []
+
+    class BM25Falso:
+        def __init__(self, idioma):
+            recibidos.append(idioma)
+
+    monkeypatch.setattr(codificadores, "DispersoBM25", BM25Falso)
+    monkeypatch.setattr(codificadores, "_disperso_por_defecto", {})
+    codificadores.disperso_desde_settings(settings_rag.model_copy(update={"bm25_idioma": "portuguese"}))
+    codificadores.disperso_desde_settings(settings_rag)
+    assert recibidos == ["portuguese", "spanish"]

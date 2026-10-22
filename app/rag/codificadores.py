@@ -42,14 +42,15 @@ class DensoSentenceTransformers:
 class DispersoBM25:
     """BM25 disperso via fastembed (carga perezosa)."""
 
-    def __init__(self):
+    def __init__(self, idioma: str):
+        self._idioma = idioma
         self._modelo = None
 
     def _cargar(self):
         if self._modelo is None:
             from fastembed import SparseTextEmbedding
 
-            self._modelo = SparseTextEmbedding(MODELO_BM25)
+            self._modelo = SparseTextEmbedding(MODELO_BM25, language=self._idioma)
         return self._modelo
 
     @staticmethod
@@ -64,7 +65,7 @@ class DispersoBM25:
 
 
 _denso_por_defecto: dict[str, DensoSentenceTransformers] = {}
-_disperso_por_defecto = DispersoBM25()
+_disperso_por_defecto: dict[str, DispersoBM25] = {}
 
 
 def denso_desde_settings(settings: Settings) -> CodificadorDenso:
@@ -74,8 +75,11 @@ def denso_desde_settings(settings: Settings) -> CodificadorDenso:
     )
 
 
-def disperso_por_defecto() -> CodificadorDisperso:
-    return _disperso_por_defecto
+def disperso_desde_settings(settings: Settings) -> CodificadorDisperso:
+    idioma = settings.bm25_idioma
+    if idioma not in _disperso_por_defecto:
+        _disperso_por_defecto[idioma] = DispersoBM25(idioma)
+    return _disperso_por_defecto[idioma]
 
 
 def cliente_desde_settings(settings: Settings) -> AsyncQdrantClient:

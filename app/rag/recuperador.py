@@ -10,7 +10,7 @@ from app.rag.codificadores import (
     CodificadorDisperso,
     cliente_desde_settings,
     denso_desde_settings,
-    disperso_por_defecto,
+    disperso_desde_settings,
     en_hilo,
 )
 from app.rag.ingesta import Documento
@@ -50,7 +50,7 @@ async def buscar(
     propio = cliente is None
     cliente = cliente or cliente_desde_settings(settings)
     denso = denso or denso_desde_settings(settings)
-    disperso = disperso or disperso_por_defecto()
+    disperso = disperso or disperso_desde_settings(settings)
     try:
         vd = (await en_hilo(denso.codificar_consulta, [consulta]))[0]
         vs = (await en_hilo(disperso.codificar_consulta, [consulta]))[0]

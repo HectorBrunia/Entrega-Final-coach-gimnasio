@@ -29,3 +29,13 @@ def test_falla_sin_variable_obligatoria(monkeypatch):
     with pytest.raises(ValidationError) as exc_info:
         Settings(_env_file=None)
     assert [e["loc"] for e in exc_info.value.errors()] == [("database_url",)]
+
+
+def test_bm25_idioma_por_defecto_y_desde_entorno(monkeypatch):
+    for k, v in dict(DATABASE_URL="x", REDIS_URL="x", QDRANT_URL="x", QDRANT_COLLECTION="x", GOOGLE_API_KEY="x",
+                     GEMINI_MODEL="x", GEMINI_RPM="1", PHOENIX_COLLECTOR_ENDPOINT="x", EMBEDDING_MODEL="x").items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("BM25_IDIOMA", raising=False)
+    assert Settings(_env_file=None).bm25_idioma == "spanish"
+    monkeypatch.setenv("BM25_IDIOMA", "english")
+    assert Settings(_env_file=None).bm25_idioma == "english"
