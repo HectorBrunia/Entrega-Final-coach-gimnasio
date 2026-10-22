@@ -13,6 +13,9 @@ dependencies = [
     "sqlalchemy[asyncio]==2.1.1",
     "asyncpg==0.32.0",
     "alembic==1.20.1",
+    "qdrant-client==1.20.0",
+    "sentence-transformers==6.1.0",
+    "fastembed==0.9.0",
 ]
 
 [project.optional-dependencies]
@@ -25,5 +28,5 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "integracion: pruebas de integracion que requieren servicios externos (Postgres)",
+    "integracion: pruebas de integracion que requieren servicios externos (Postgres, Qdrant)",
 ]
