@@ -27,7 +27,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `hombro_izquierdo` | 612 | 264 |
 | `rodilla_derecha` | 406 | 470 |
 | `rodilla_izquierda` | 406 | 470 |
-| `zona_lumbar` | 635 | 241 |
+| `zona_lumbar` | 649 | 227 |
 
 ## `hombro_derecho` (612 bloqueados)
 
@@ -2101,10 +2101,10 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Yoke_Walk` | Yoke Walk | quadriceps | músculo: quadriceps; músculo: abductors; músculo: adductors; músculo: calves; músculo: glutes; músculo: hamstrings; patrón: walk; patrón: yoke |
 | `Zercher_Squats` | Zercher Squats | quadriceps | músculo: quadriceps; músculo: calves; músculo: glutes; músculo: hamstrings; patrón: squat |
 
-## `zona_lumbar` (635 bloqueados)
+## `zona_lumbar` (649 bloqueados)
 
 - Músculos: abdominals, glutes, hamstrings, lower back
-- Patrones: `deadlift`, `good morning`, `hyperextension`, `back extension`, `bent over`, `clean`, `snatch`, `jerk`, `squat`, `lunge`, `thruster`, `leg press`, `romanian`, `stiff leg`, `pull through`, `rack pull`, `high pull`, `swing`, `pass between`, `figure 8`, `superman`, `locust`, `row`, `shrug`, `overhead`, `military`, `push press`, `handstand`, `standing`, `powerlifting`, `sit up`, `situp`, `crunch`, `v up`, `jackknife`, `leg raise`, `rollout`, `ab roller`, `fallout`, `twist`, `rotation`, `wood chop`, `woodchop`, `windmill`, `side bend`, `landmine`, `muscle up`, `kipping`, `rope`, `atlas stone`, `stone`, `log lift`, `tire flip`, `yoke`, `farmer`, `rickshaw`, `keg`, `sandbag`, `sled`, `drag`, `car driver`, `throw`, `slam`, `chest push`, `stance`, `heavy bag`, `rack delivery`, `bridge`, `hip thrust`, `pullover`, `hanging`, `jump`, `hops`, `bound`, `leap`, `skip`, `sprint`, `running`, `jog`, `skating`, `mountain climber`, `burpee`, `box`, `step up`, `stepup`, `bicycl`, `bike`, `shoulder press`, `jammer`, `medicine ball`, `power partials`, `calf raise`, `donkey`, `monster walk`, `groiner`, `bench press`, `board press`, `pin press`, `push up`, `pushup`, `plyo`, `drop push`, `hip flexor`, `iron crosses`, `lying crossover`, `looking at ceiling`, `back`
+- Patrones: `deadlift`, `good morning`, `hyperextension`, `back extension`, `bent over`, `clean`, `snatch`, `jerk`, `squat`, `lunge`, `thruster`, `leg press`, `romanian`, `stiff leg`, `pull through`, `rack pull`, `high pull`, `swing`, `pass between`, `figure 8`, `superman`, `locust`, `row`, `shrug`, `overhead`, `military`, `push press`, `handstand`, `standing`, `powerlifting`, `sit up`, `situp`, `crunch`, `v up`, `jackknife`, `leg raise`, `rollout`, `ab roller`, `fallout`, `twist`, `rotation`, `wood chop`, `woodchop`, `windmill`, `side bend`, `landmine`, `muscle up`, `kipping`, `rope`, `atlas stone`, `stone`, `log lift`, `tire flip`, `yoke`, `farmer`, `rickshaw`, `keg`, `sandbag`, `sled`, `drag`, `car driver`, `throw`, `slam`, `chest push`, `stance`, `heavy bag`, `rack delivery`, `bridge`, `hip thrust`, `pullover`, `hanging`, `jump`, `hops`, `bound`, `leap`, `skip`, `sprint`, `running`, `jog`, `skating`, `mountain climber`, `burpee`, `box`, `step up`, `stepup`, `bicycl`, `bike`, `shoulder press`, `kettlebell`, `seesaw`, `see saw`, `para press`, `arnold`, `bradford`, `cuban press`, `seated dumbbell press`, `dumbbell one arm triceps extension`, `seated triceps press`, `anti gravity`, `jammer`, `medicine ball`, `power partials`, `calf raise`, `donkey`, `monster walk`, `groiner`, `bench press`, `board press`, `pin press`, `push up`, `pushup`, `plyo`, `drop push`, `hip flexor`, `iron crosses`, `lying crossover`, `looking at ceiling`, `back`
 - Ids extra: (ninguno)
 
 | Id | Nombre | Músculo primario | Motivo |
@@ -2113,16 +2113,19 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `90_90_Hamstring` | 90/90 Hamstring | hamstrings | músculo: hamstrings |
 | `Ab_Crunch_Machine` | Ab Crunch Machine | abdominals | músculo: abdominals; patrón: crunch |
 | `Ab_Roller` | Ab Roller | abdominals | músculo: abdominals; patrón: ab roller |
-| `Advanced_Kettlebell_Windmill` | Advanced Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill |
+| `Advanced_Kettlebell_Windmill` | Advanced Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill; patrón: kettlebell |
 | `Air_Bike` | Air Bike | abdominals | músculo: abdominals; patrón: bike |
 | `Alternate_Heel_Touchers` | Alternate Heel Touchers | abdominals | músculo: abdominals |
 | `Alternate_Leg_Diagonal_Bound` | Alternate Leg Diagonal Bound | quadriceps | músculo: glutes; músculo: hamstrings; patrón: bound |
 | `Alternating_Cable_Shoulder_Press` | Alternating Cable Shoulder Press | shoulders | patrón: shoulder press |
 | `Alternating_Floor_Press` | Alternating Floor Press | chest | músculo: abdominals |
 | `Alternating_Hang_Clean` | Alternating Hang Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `Alternating_Kettlebell_Row` | Alternating Kettlebell Row | middle back | patrón: row |
+| `Alternating_Kettlebell_Press` | Alternating Kettlebell Press | shoulders | patrón: kettlebell |
+| `Alternating_Kettlebell_Row` | Alternating Kettlebell Row | middle back | patrón: row; patrón: kettlebell |
 | `Alternating_Renegade_Row` | Alternating Renegade Row | middle back | músculo: abdominals; patrón: row |
 | `Ankle_On_The_Knee` | Ankle On The Knee | glutes | músculo: glutes |
+| `Anti-Gravity_Press` | Anti-Gravity Press | shoulders | patrón: anti gravity |
+| `Arnold_Dumbbell_Press` | Arnold Dumbbell Press | shoulders | patrón: arnold |
 | `Atlas_Stone_Trainer` | Atlas Stone Trainer | lower back | músculo: lower back; músculo: glutes; músculo: hamstrings; patrón: atlas stone; patrón: stone |
 | `Atlas_Stones` | Atlas Stones | lower back | músculo: lower back; músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: atlas stone; patrón: stone |
 | `Axle_Deadlift` | Axle Deadlift | lower back | músculo: lower back; músculo: glutes; músculo: hamstrings; patrón: deadlift |
@@ -2191,6 +2194,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Box_Squat` | Box Squat | quadriceps | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: squat; patrón: box |
 | `Box_Squat_with_Bands` | Box Squat with Bands | quadriceps | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: squat; patrón: box |
 | `Box_Squat_with_Chains` | Box Squat with Chains | quadriceps | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: squat; patrón: box |
+| `Bradford_Rocky_Presses` | Bradford/Rocky Presses | shoulders | patrón: bradford |
 | `Butt-Ups` | Butt-Ups | abdominals | músculo: abdominals |
 | `Butt_Lift_Bridge` | Butt Lift (Bridge) | glutes | músculo: glutes; músculo: hamstrings; patrón: bridge |
 | `Cable_Crunch` | Cable Crunch | abdominals | músculo: abdominals; patrón: crunch |
@@ -2241,6 +2245,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Crunch_-_Hands_Overhead` | Crunch - Hands Overhead | abdominals | músculo: abdominals; patrón: overhead; patrón: crunch |
 | `Crunch_-_Legs_On_Exercise_Ball` | Crunch - Legs On Exercise Ball | abdominals | músculo: abdominals; patrón: crunch |
 | `Crunches` | Crunches | abdominals | músculo: abdominals; patrón: crunch |
+| `Cuban_Press` | Cuban Press | shoulders | patrón: cuban press |
 | `Dancers_Stretch` | Dancer's Stretch | lower back | músculo: lower back; músculo: glutes |
 | `Dead_Bug` | Dead Bug | abdominals | músculo: abdominals |
 | `Deadlift_with_Bands` | Deadlift with Bands | lower back | músculo: lower back; músculo: glutes; músculo: hamstrings; patrón: deadlift |
@@ -2254,11 +2259,11 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Deficit_Deadlift` | Deficit Deadlift | lower back | músculo: lower back; músculo: glutes; músculo: hamstrings; patrón: deadlift |
 | `Depth_Jump_Leap` | Depth Jump Leap | quadriceps | músculo: glutes; músculo: hamstrings; patrón: jump; patrón: leap |
 | `Donkey_Calf_Raises` | Donkey Calf Raises | calves | patrón: calf raise; patrón: donkey |
-| `Double_Kettlebell_Alternating_Hang_Clean` | Double Kettlebell Alternating Hang Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `Double_Kettlebell_Jerk` | Double Kettlebell Jerk | shoulders | patrón: jerk |
-| `Double_Kettlebell_Push_Press` | Double Kettlebell Push Press | shoulders | patrón: push press |
-| `Double_Kettlebell_Snatch` | Double Kettlebell Snatch | shoulders | músculo: glutes; músculo: hamstrings; patrón: snatch |
-| `Double_Kettlebell_Windmill` | Double Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill |
+| `Double_Kettlebell_Alternating_Hang_Clean` | Double Kettlebell Alternating Hang Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `Double_Kettlebell_Jerk` | Double Kettlebell Jerk | shoulders | patrón: jerk; patrón: kettlebell |
+| `Double_Kettlebell_Push_Press` | Double Kettlebell Push Press | shoulders | patrón: push press; patrón: kettlebell |
+| `Double_Kettlebell_Snatch` | Double Kettlebell Snatch | shoulders | músculo: glutes; músculo: hamstrings; patrón: snatch; patrón: kettlebell |
+| `Double_Kettlebell_Windmill` | Double Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill; patrón: kettlebell |
 | `Double_Leg_Butt_Kick` | Double Leg Butt Kick | quadriceps | músculo: glutes; músculo: hamstrings |
 | `Downward_Facing_Balance` | Downward Facing Balance | glutes | músculo: glutes; músculo: abdominals; músculo: hamstrings |
 | `Drag_Curl` | Drag Curl | biceps | patrón: drag |
@@ -2269,6 +2274,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Dumbbell_Incline_Row` | Dumbbell Incline Row | middle back | patrón: row |
 | `Dumbbell_Lunges` | Dumbbell Lunges | quadriceps | músculo: glutes; músculo: hamstrings; patrón: lunge |
 | `Dumbbell_One-Arm_Shoulder_Press` | Dumbbell One-Arm Shoulder Press | shoulders | patrón: shoulder press |
+| `Dumbbell_One-Arm_Triceps_Extension` | Dumbbell One-Arm Triceps Extension | triceps | patrón: dumbbell one arm triceps extension |
 | `Dumbbell_One-Arm_Upright_Row` | Dumbbell One-Arm Upright Row | shoulders | patrón: row |
 | `Dumbbell_Rear_Lunge` | Dumbbell Rear Lunge | quadriceps | músculo: glutes; músculo: hamstrings; patrón: lunge |
 | `Dumbbell_Seated_Box_Jump` | Dumbbell Seated Box Jump | quadriceps | músculo: glutes; músculo: hamstrings; patrón: jump; patrón: box |
@@ -2287,6 +2293,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Elliptical_Trainer` | Elliptical Trainer | quadriceps | músculo: glutes; músculo: hamstrings |
 | `Exercise_Ball_Crunch` | Exercise Ball Crunch | abdominals | músculo: abdominals; patrón: crunch |
 | `Exercise_Ball_Pull-In` | Exercise Ball Pull-In | abdominals | músculo: abdominals |
+| `Extended_Range_One-Arm_Kettlebell_Floor_Press` | Extended Range One-Arm Kettlebell Floor Press | chest | patrón: kettlebell |
 | `External_Rotation` | External Rotation | shoulders | patrón: rotation |
 | `External_Rotation_with_Band` | External Rotation with Band | shoulders | patrón: rotation |
 | `External_Rotation_with_Cable` | External Rotation with Cable | shoulders | patrón: rotation |
@@ -2308,7 +2315,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Front_Leg_Raises` | Front Leg Raises | hamstrings | músculo: hamstrings; patrón: leg raise |
 | `Front_Raise_And_Pullover` | Front Raise And Pullover | chest | patrón: pullover |
 | `Front_Squat_Clean_Grip` | Front Squat (Clean Grip) | quadriceps | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: clean; patrón: squat |
-| `Front_Squats_With_Two_Kettlebells` | Front Squats With Two Kettlebells | quadriceps | músculo: glutes; patrón: squat |
+| `Front_Squats_With_Two_Kettlebells` | Front Squats With Two Kettlebells | quadriceps | músculo: glutes; patrón: squat; patrón: kettlebell |
 | `Glute_Ham_Raise` | Glute Ham Raise | hamstrings | músculo: hamstrings; músculo: glutes |
 | `Glute_Kickback` | Glute Kickback | glutes | músculo: glutes; músculo: hamstrings; patrón: back |
 | `Goblet_Squat` | Goblet Squat | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat |
@@ -2362,21 +2369,24 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Jerk_Dip_Squat` | Jerk Dip Squat | quadriceps | músculo: abdominals; patrón: jerk; patrón: squat |
 | `Jogging_Treadmill` | Jogging, Treadmill | quadriceps | músculo: glutes; músculo: hamstrings; patrón: jog |
 | `Keg_Load` | Keg Load | lower back | músculo: lower back; músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: keg |
-| `Kettlebell_Dead_Clean` | Kettlebell Dead Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `Kettlebell_Figure_8` | Kettlebell Figure 8 | abdominals | músculo: abdominals; músculo: hamstrings; patrón: figure 8 |
-| `Kettlebell_Halo` | Kettlebell Halo | shoulders | músculo: abdominals |
-| `Kettlebell_Halo_With_Overhead_Extension` | Kettlebell Halo with Overhead Extension | shoulders | músculo: abdominals; patrón: overhead |
-| `Kettlebell_Hang_Clean` | Kettlebell Hang Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `Kettlebell_One-Legged_Deadlift` | Kettlebell One-Legged Deadlift | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: deadlift |
-| `Kettlebell_Overhead_Triceps_Extension` | Kettlebell Overhead Triceps Extension | triceps | músculo: abdominals; patrón: overhead |
-| `Kettlebell_Pass_Between_The_Legs` | Kettlebell Pass Between The Legs | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: pass between |
-| `Kettlebell_Pirate_Ships` | Kettlebell Pirate Ships | shoulders | músculo: abdominals |
-| `Kettlebell_Pistol_Squat` | Kettlebell Pistol Squat | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat |
-| `Kettlebell_Sumo_High_Pull` | Kettlebell Sumo High Pull | traps | músculo: glutes; músculo: hamstrings; patrón: high pull |
-| `Kettlebell_Thruster` | Kettlebell Thruster | shoulders | patrón: thruster |
-| `Kettlebell_Turkish_Get-Up_Lunge_style` | Kettlebell Turkish Get-Up (Lunge style) | shoulders | músculo: abdominals; músculo: hamstrings; patrón: lunge |
-| `Kettlebell_Turkish_Get-Up_Squat_style` | Kettlebell Turkish Get-Up (Squat style) | shoulders | músculo: abdominals; músculo: hamstrings; patrón: squat |
-| `Kettlebell_Windmill` | Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill |
+| `Kettlebell_Arnold_Press` | Kettlebell Arnold Press | shoulders | patrón: kettlebell; patrón: arnold |
+| `Kettlebell_Dead_Clean` | Kettlebell Dead Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `Kettlebell_Figure_8` | Kettlebell Figure 8 | abdominals | músculo: abdominals; músculo: hamstrings; patrón: figure 8; patrón: kettlebell |
+| `Kettlebell_Halo` | Kettlebell Halo | shoulders | músculo: abdominals; patrón: kettlebell |
+| `Kettlebell_Halo_With_Overhead_Extension` | Kettlebell Halo with Overhead Extension | shoulders | músculo: abdominals; patrón: overhead; patrón: kettlebell |
+| `Kettlebell_Hang_Clean` | Kettlebell Hang Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `Kettlebell_One-Legged_Deadlift` | Kettlebell One-Legged Deadlift | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: deadlift; patrón: kettlebell |
+| `Kettlebell_Overhead_Triceps_Extension` | Kettlebell Overhead Triceps Extension | triceps | músculo: abdominals; patrón: overhead; patrón: kettlebell |
+| `Kettlebell_Pass_Between_The_Legs` | Kettlebell Pass Between The Legs | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: pass between; patrón: kettlebell |
+| `Kettlebell_Pirate_Ships` | Kettlebell Pirate Ships | shoulders | músculo: abdominals; patrón: kettlebell |
+| `Kettlebell_Pistol_Squat` | Kettlebell Pistol Squat | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat; patrón: kettlebell |
+| `Kettlebell_Seated_Press` | Kettlebell Seated Press | shoulders | patrón: kettlebell |
+| `Kettlebell_Seesaw_Press` | Kettlebell Seesaw Press | shoulders | patrón: kettlebell; patrón: seesaw; patrón: see saw |
+| `Kettlebell_Sumo_High_Pull` | Kettlebell Sumo High Pull | traps | músculo: glutes; músculo: hamstrings; patrón: high pull; patrón: kettlebell |
+| `Kettlebell_Thruster` | Kettlebell Thruster | shoulders | patrón: thruster; patrón: kettlebell |
+| `Kettlebell_Turkish_Get-Up_Lunge_style` | Kettlebell Turkish Get-Up (Lunge style) | shoulders | músculo: abdominals; músculo: hamstrings; patrón: lunge; patrón: kettlebell |
+| `Kettlebell_Turkish_Get-Up_Squat_style` | Kettlebell Turkish Get-Up (Squat style) | shoulders | músculo: abdominals; músculo: hamstrings; patrón: squat; patrón: kettlebell |
+| `Kettlebell_Windmill` | Kettlebell Windmill | abdominals | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: windmill; patrón: kettlebell |
 | `Kipping_Muscle_Up` | Kipping Muscle Up | lats | músculo: abdominals; patrón: muscle up; patrón: kipping |
 | `Knee_Across_The_Body` | Knee Across The Body | glutes | músculo: glutes; músculo: lower back |
 | `Knee_Circles` | Knee Circles | calves | músculo: hamstrings |
@@ -2446,27 +2456,29 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `On-Your-Back_Quad_Stretch` | On-Your-Back Quad Stretch | quadriceps | patrón: back |
 | `One-Arm_Dumbbell_Row` | One-Arm Dumbbell Row | middle back | patrón: row |
 | `One-Arm_High-Pulley_Cable_Side_Bends` | One-Arm High-Pulley Cable Side Bends | abdominals | músculo: abdominals; patrón: high pull; patrón: side bend |
-| `One-Arm_Kettlebell_Clean` | One-Arm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `One-Arm_Kettlebell_Clean_and_Jerk` | One-Arm Kettlebell Clean and Jerk | shoulders | patrón: clean; patrón: jerk |
-| `One-Arm_Kettlebell_Jerk` | One-Arm Kettlebell Jerk | shoulders | patrón: jerk |
-| `One-Arm_Kettlebell_Military_Press_To_The_Side` | One-Arm Kettlebell Military Press To The Side | shoulders | patrón: military |
-| `One-Arm_Kettlebell_Push_Press` | One-Arm Kettlebell Push Press | shoulders | patrón: push press |
-| `One-Arm_Kettlebell_Row` | One-Arm Kettlebell Row | middle back | patrón: row |
-| `One-Arm_Kettlebell_Snatch` | One-Arm Kettlebell Snatch | shoulders | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: snatch |
-| `One-Arm_Kettlebell_Split_Jerk` | One-Arm Kettlebell Split Jerk | shoulders | músculo: glutes; músculo: hamstrings; patrón: jerk |
-| `One-Arm_Kettlebell_Split_Snatch` | One-Arm Kettlebell Split Snatch | shoulders | músculo: hamstrings; patrón: snatch |
-| `One-Arm_Kettlebell_Swings` | One-Arm Kettlebell Swings | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: swing |
+| `One-Arm_Kettlebell_Clean` | One-Arm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `One-Arm_Kettlebell_Clean_and_Jerk` | One-Arm Kettlebell Clean and Jerk | shoulders | patrón: clean; patrón: jerk; patrón: kettlebell |
+| `One-Arm_Kettlebell_Floor_Press` | One-Arm Kettlebell Floor Press | chest | patrón: kettlebell |
+| `One-Arm_Kettlebell_Jerk` | One-Arm Kettlebell Jerk | shoulders | patrón: jerk; patrón: kettlebell |
+| `One-Arm_Kettlebell_Military_Press_To_The_Side` | One-Arm Kettlebell Military Press To The Side | shoulders | patrón: military; patrón: kettlebell |
+| `One-Arm_Kettlebell_Para_Press` | One-Arm Kettlebell Para Press | shoulders | patrón: kettlebell; patrón: para press |
+| `One-Arm_Kettlebell_Push_Press` | One-Arm Kettlebell Push Press | shoulders | patrón: push press; patrón: kettlebell |
+| `One-Arm_Kettlebell_Row` | One-Arm Kettlebell Row | middle back | patrón: row; patrón: kettlebell |
+| `One-Arm_Kettlebell_Snatch` | One-Arm Kettlebell Snatch | shoulders | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: snatch; patrón: kettlebell |
+| `One-Arm_Kettlebell_Split_Jerk` | One-Arm Kettlebell Split Jerk | shoulders | músculo: glutes; músculo: hamstrings; patrón: jerk; patrón: kettlebell |
+| `One-Arm_Kettlebell_Split_Snatch` | One-Arm Kettlebell Split Snatch | shoulders | músculo: hamstrings; patrón: snatch; patrón: kettlebell |
+| `One-Arm_Kettlebell_Swings` | One-Arm Kettlebell Swings | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: swing; patrón: kettlebell |
 | `One-Arm_Long_Bar_Row` | One-Arm Long Bar Row | middle back | patrón: row |
 | `One-Arm_Medicine_Ball_Slam` | One-Arm Medicine Ball Slam | abdominals | músculo: abdominals; patrón: slam; patrón: medicine ball |
-| `One-Arm_Open_Palm_Kettlebell_Clean` | One-Arm Open Palm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
-| `One-Arm_Overhead_Kettlebell_Squats` | One-Arm Overhead Kettlebell Squats | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat; patrón: overhead |
+| `One-Arm_Open_Palm_Kettlebell_Clean` | One-Arm Open Palm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `One-Arm_Overhead_Kettlebell_Squats` | One-Arm Overhead Kettlebell Squats | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat; patrón: overhead; patrón: kettlebell |
 | `One-Arm_Side_Deadlift` | One-Arm Side Deadlift | quadriceps | músculo: abdominals; músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: deadlift |
 | `One-Legged_Cable_Kickback` | One-Legged Cable Kickback | glutes | músculo: glutes; músculo: hamstrings; patrón: back |
 | `One_Arm_Dumbbell_Bench_Press` | One Arm Dumbbell Bench Press | chest | patrón: bench press |
 | `One_Half_Locust` | One Half Locust | quadriceps | músculo: abdominals; patrón: locust |
 | `One_Knee_To_Chest` | One Knee To Chest | glutes | músculo: glutes; músculo: hamstrings; músculo: lower back |
 | `One_Leg_Barbell_Squat` | One Leg Barbell Squat | quadriceps | músculo: glutes; músculo: hamstrings; patrón: squat |
-| `Open_Palm_Kettlebell_Clean` | Open Palm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
+| `Open_Palm_Kettlebell_Clean` | Open Palm Kettlebell Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean; patrón: kettlebell |
 | `Otis-Up` | Otis-Up | abdominals | músculo: abdominals |
 | `Overhead_Cable_Curl` | Overhead Cable Curl | biceps | patrón: overhead |
 | `Overhead_Lat` | Overhead Lat | lats | patrón: overhead |
@@ -2484,7 +2496,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Plate_Twist` | Plate Twist | abdominals | músculo: abdominals; patrón: twist |
 | `Platform_Hamstring_Slides` | Platform Hamstring Slides | hamstrings | músculo: hamstrings; músculo: glutes |
 | `Plie_Dumbbell_Squat` | Plie Dumbbell Squat | quadriceps | músculo: abdominals; músculo: glutes; músculo: hamstrings; patrón: squat |
-| `Plyo_Kettlebell_Pushups` | Plyo Kettlebell Pushups | chest | patrón: yoke; patrón: push up; patrón: pushup; patrón: plyo |
+| `Plyo_Kettlebell_Pushups` | Plyo Kettlebell Pushups | chest | patrón: yoke; patrón: kettlebell; patrón: push up; patrón: pushup; patrón: plyo |
 | `Plyo_Push-up` | Plyo Push-up | chest | patrón: push up; patrón: pushup; patrón: plyo |
 | `Power_Clean` | Power Clean | hamstrings | músculo: hamstrings; músculo: glutes; músculo: lower back; patrón: clean |
 | `Power_Clean_from_Blocks` | Power Clean from Blocks | hamstrings | músculo: hamstrings; patrón: clean |
@@ -2551,6 +2563,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Seated_Cable_Shoulder_Press` | Seated Cable Shoulder Press | shoulders | patrón: shoulder press |
 | `Seated_Calf_Raise` | Seated Calf Raise | calves | patrón: calf raise |
 | `Seated_Calf_Stretch` | Seated Calf Stretch | calves | músculo: hamstrings; músculo: lower back |
+| `Seated_Dumbbell_Press` | Seated Dumbbell Press | shoulders | patrón: seated dumbbell press |
 | `Seated_Flat_Bench_Leg_Pull-In` | Seated Flat Bench Leg Pull-In | abdominals | músculo: abdominals |
 | `Seated_Floor_Hamstring_Stretch` | Seated Floor Hamstring Stretch | hamstrings | músculo: hamstrings |
 | `Seated_Glute` | Seated Glute | glutes | músculo: glutes |
@@ -2562,7 +2575,8 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Seated_Leg_Tucks` | Seated Leg Tucks | abdominals | músculo: abdominals |
 | `Seated_One-arm_Cable_Pulley_Rows` | Seated One-arm Cable Pulley Rows | middle back | patrón: row |
 | `Seated_Overhead_Stretch` | Seated Overhead Stretch | abdominals | músculo: abdominals; patrón: overhead |
-| `See-Saw_Press_Alternating_Side_Press` | See-Saw Press (Alternating Side Press) | shoulders | músculo: abdominals |
+| `Seated_Triceps_Press` | Seated Triceps Press | triceps | patrón: seated triceps press |
+| `See-Saw_Press_Alternating_Side_Press` | See-Saw Press (Alternating Side Press) | shoulders | músculo: abdominals; patrón: seesaw; patrón: see saw |
 | `Shotgun_Row` | Shotgun Row | lats | patrón: row |
 | `Shoulder_Press_-_With_Bands` | Shoulder Press - With Bands | shoulders | patrón: shoulder press |
 | `Side_Bridge` | Side Bridge | abdominals | músculo: abdominals; patrón: bridge |
@@ -2640,7 +2654,7 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Standing_Bent-Over_Two-Arm_Dumbbell_Triceps_Extension` | Standing Bent-Over Two-Arm Dumbbell Triceps Extension | triceps | patrón: bent over; patrón: standing |
 | `Standing_Biceps_Cable_Curl` | Standing Biceps Cable Curl | biceps | patrón: standing |
 | `Standing_Biceps_Stretch` | Standing Biceps Stretch | biceps | patrón: standing |
-| `Standing_Bradford_Press` | Standing Bradford Press | shoulders | patrón: standing |
+| `Standing_Bradford_Press` | Standing Bradford Press | shoulders | patrón: standing; patrón: bradford |
 | `Standing_Cable_Chest_Press` | Standing Cable Chest Press | chest | patrón: standing |
 | `Standing_Cable_Lift` | Standing Cable Lift | abdominals | músculo: abdominals; patrón: standing |
 | `Standing_Cable_Wood_Chop` | Standing Cable Wood Chop | abdominals | músculo: abdominals; patrón: standing; patrón: wood chop; patrón: woodchop |
@@ -2714,10 +2728,10 @@ proceso (falla cerrado). Por favor, revisa sobre todo dos cosas: ejercicios de r
 | `Triceps_Overhead_Extension_with_Rope` | Triceps Overhead Extension with Rope | triceps | patrón: overhead; patrón: rope |
 | `Triceps_Pushdown_-_Rope_Attachment` | Triceps Pushdown - Rope Attachment | triceps | patrón: rope |
 | `Tuck_Crunch` | Tuck Crunch | abdominals | músculo: abdominals; patrón: crunch |
-| `Two-Arm_Kettlebell_Clean` | Two-Arm Kettlebell Clean | shoulders | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: clean |
-| `Two-Arm_Kettlebell_Jerk` | Two-Arm Kettlebell Jerk | shoulders | patrón: jerk |
-| `Two-Arm_Kettlebell_Military_Press` | Two-Arm Kettlebell Military Press | shoulders | patrón: military |
-| `Two-Arm_Kettlebell_Row` | Two-Arm Kettlebell Row | middle back | patrón: row |
+| `Two-Arm_Kettlebell_Clean` | Two-Arm Kettlebell Clean | shoulders | músculo: glutes; músculo: hamstrings; músculo: lower back; patrón: clean; patrón: kettlebell |
+| `Two-Arm_Kettlebell_Jerk` | Two-Arm Kettlebell Jerk | shoulders | patrón: jerk; patrón: kettlebell |
+| `Two-Arm_Kettlebell_Military_Press` | Two-Arm Kettlebell Military Press | shoulders | patrón: military; patrón: kettlebell |
+| `Two-Arm_Kettlebell_Row` | Two-Arm Kettlebell Row | middle back | patrón: row; patrón: kettlebell |
 | `Upper_Back-Leg_Grab` | Upper Back-Leg Grab | hamstrings | músculo: hamstrings; músculo: lower back; patrón: back |
 | `Upper_Back_Stretch` | Upper Back Stretch | middle back | patrón: back |
 | `Upright_Barbell_Row` | Upright Barbell Row | shoulders | patrón: row |

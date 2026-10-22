@@ -139,3 +139,26 @@ def test_regla_es_inmutable():
     regla = next(iter(REGLAS_LESION.values()))
     with pytest.raises(Exception):
         regla.musculos = frozenset()  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("ejercicio_id", [
+    # Presses con kettlebell: empiezan con una cargada desde el suelo (revision Task 4b).
+    "Alternating_Kettlebell_Press",
+    "Kettlebell_Arnold_Press",
+    "Kettlebell_Seesaw_Press",
+    "One-Arm_Kettlebell_Para_Press",
+    "Kettlebell_Seated_Press",
+    # Presses por encima de la cabeza hallados en el reescaneo de falsos negativos.
+    "Seated_Dumbbell_Press",
+    "Arnold_Dumbbell_Press",
+    "Bradford_Rocky_Presses",
+    "Cuban_Press",
+    "Anti-Gravity_Press",
+    "Dumbbell_One-Arm_Triceps_Extension",
+    "Seated_Triceps_Press",
+    "See-Saw_Press_Alternating_Side_Press",
+])
+def test_presses_de_riesgo_lumbar_quedan_bloqueados(catalogo, ejercicio_id):
+    res = filtrar_por_lesiones(list(catalogo.values()), [_lesion("zona_lumbar")])
+    assert (ejercicio_id, "zona_lumbar") in res.bloqueados
+    assert ejercicio_id not in {e.id for e in res.permitidos}

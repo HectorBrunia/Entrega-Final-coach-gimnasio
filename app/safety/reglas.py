@@ -315,6 +315,17 @@ _LUMBAR = ReglaZona(
         "bicycl",            # bicicleta: flexion lumbar sostenida
         "bike",              # bicicleta estatica / air bike: flexion lumbar sostenida
         "shoulder press",    # press de hombro: carga axial (de pie o sentado sin respaldo)
+        "kettlebell",        # kettlebell: casi siempre parte de una cargada desde el suelo (bisagra)
+        "seesaw",            # press alterno tipo balancin: de pie, con carga axial asimetrica
+        "see saw",           # variante de nombre con separador (See-Saw Press)
+        "para press",        # para press: cargada previa y press por encima de la cabeza
+        "arnold",            # press Arnold: press por encima de la cabeza con carga axial
+        "bradford",          # press Bradford/Rocky: barra recogida del suelo y por encima de la cabeza
+        "cuban press",       # press cubano: termina con las mancuernas por encima de la cabeza
+        "seated dumbbell press",  # press de hombro sentado: misma carga axial que shoulder press
+        "dumbbell one arm triceps extension",  # extension de triceps por encima de la cabeza
+        "seated triceps press",  # extension de triceps sentado por encima de la cabeza
+        "anti gravity",      # anti-gravity press: la barra se recoge del suelo antes de presionar
         "jammer",            # landmine jammer: extension explosiva de todo el cuerpo
         "medicine ball",     # balon medicinal: lanzamientos con impulso de tronco
         "power partials",    # parciales explosivos de pie
