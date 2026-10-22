@@ -13,8 +13,13 @@ services:
 
   redis:
     image: redis/redis-stack:7.4.0-v3
+    environment:
+      # AOF: los checkpoints del grafo sobreviven a reinicios de Redis (el entrypoint lee REDIS_ARGS)
+      REDIS_ARGS: "--appendonly yes"
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
   qdrant:
     image: qdrant/qdrant:v1.12.4
@@ -25,9 +30,15 @@ services:
 
   phoenix:
     image: arizephoenix/phoenix:version-6.0.0
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
     ports:
       - "6006:6006"
+    volumes:
+      - phoenix_data:/mnt/data
 
 volumes:
   postgres_data:
   qdrant_data:
+  redis_data:
+  phoenix_data:
