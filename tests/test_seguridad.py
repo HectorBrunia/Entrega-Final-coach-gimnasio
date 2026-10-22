@@ -1,4 +1,6 @@
-from app.safety.reglas import filtrar_por_lesiones
+import pytest
+
+from app.safety.reglas import ZonaLesionDesconocida, filtrar_por_lesiones
 from app.domain.modelos import Ejercicio, Lesion, Nivel
 
 
@@ -26,10 +28,23 @@ def test_sin_permitidos_devuelve_lista_vacia_sin_error():
     assert res.permitidos == []
 
 
-def test_zona_desconocida_no_bloquea_y_no_falla():
+def test_zona_activa_desconocida_lanza():
+    with pytest.raises(ZonaLesionDesconocida, match="hombro"):
+        filtrar_por_lesiones([_ej("press_militar")],
+                             [Lesion(zona="hombro", severidad="grave", activa=True)])
+
+
+def test_zona_inactiva_desconocida_no_lanza():
     res = filtrar_por_lesiones([_ej("press_militar")],
-                               [Lesion(zona="hombro", severidad="grave", activa=True)])
+                               [Lesion(zona="rodilla_x", severidad="leve", activa=False)])
     assert len(res.permitidos) == 1 and res.bloqueados == []
+
+
+def test_zona_con_espacios_y_mayusculas_se_normaliza():
+    res = filtrar_por_lesiones([_ej("press_militar")],
+                               [Lesion(zona=" Hombro_Derecho ", severidad="leve", activa=True)])
+    assert res.permitidos == []
+    assert ("press_militar", "hombro_derecho") in res.bloqueados
 
 
 def test_dos_lesiones_reportan_cada_par():
