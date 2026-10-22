@@ -24,8 +24,12 @@ bash run.sh          # Linux, macOS o Git Bash
 ```
 
 ```powershell
-.\run.ps1            # Windows PowerShell
+powershell -ExecutionPolicy Bypass -File .\run.ps1    # Windows PowerShell
 ```
+
+En Windows la política de ejecución por defecto (`Restricted`) impide lanzar `.\run.ps1`
+directamente; el comando de arriba la omite solo para ese proceso, sin cambiar la
+configuración del sistema. Desde Git Bash también sirve `bash run.sh`.
 
 La primera ejecución copia `.env.example` a `.env` y se detiene: completa `GOOGLE_API_KEY` y
 `GEMINI_MODEL` en `.env` y vuelve a ejecutar el mismo comando. Después el script:
@@ -51,6 +55,13 @@ Al terminar:
 Volver a ejecutar el script es seguro: las migraciones ya aplicadas no se repiten y la ingesta
 no recodifica nada si el corpus no cambió. Para detener los servicios: `docker compose stop`.
 
+Qdrant usa la imagen `v1.20.0` (alineada con `qdrant-client` 1.20.0) y el volumen
+`qdrant_data_v1_20`. El almacenamiento de versiones anteriores (`v1.12.4`, volumen
+`qdrant_data`) no se puede abrir con `v1.20`, así que no se reutiliza. Su contenido es
+derivado: el script vuelve a crear la colección y la ingiere. Si te quedó el volumen
+antiguo, puedes borrarlo a mano cuando quieras con
+`docker volume rm coach-gimnasio_qdrant_data`.
+
 El mismo `.env` sirve para el compose y para ejecutar en local: dentro del contenedor `api`,
 `docker-compose.yml` sustituye las URLs de `localhost` por los nombres de los servicios
 (`postgres`, `redis`, `qdrant`, `phoenix`). La variable `COACH_ENV_FILE` permite usar otro
@@ -70,6 +81,12 @@ curl http://localhost:8000/usuarios/<uuid>/rutinas/actual
 `ejercicio_id` es el id del catálogo (`data/catalogo/exercises.json`); un id desconocido
 responde 422.
 
+El equipo del perfil se guarda con el vocabulario del catálogo (`barbell`, `dumbbell`,
+`machine`, `cable`, `kettlebells`, `bands`, `cuerpo`, …): los sinónimos en español
+("barra", "mancuernas", "máquinas", "poleas", "peso corporal", …) se traducen al validar el
+perfil ([app/domain/equipo.py](app/domain/equipo.py)) y un equipo desconocido se ignora con
+un aviso en el log. Así el filtro por equipo del programador acota de verdad los candidatos.
+
 ### Elección del modelo
 
 `GEMINI_MODEL` es configurable. Se recomienda un modelo *flash-lite* (por ejemplo
@@ -79,6 +96,9 @@ minuto, y ante un HTTP 429 la llamada se reintenta con espera exponencial
 ([app/llm.py](app/llm.py)). Si los reintentos se agotan, `/chat` responde 503. Otros errores
 del proveedor (por ejemplo, una clave inválida) responden 500 con `{"detail": "Error interno"}`
 y la API sigue en servicio.
+
+Los modelos del RAG también salen del entorno: `EMBEDDING_MODEL` (embeddings densos) y
+`BM25_MODELO` (BM25 disperso de fastembed, `Qdrant/bm25` por defecto, con `BM25_IDIOMA`).
 
 ## Arquitectura
 
@@ -141,8 +161,16 @@ Detalles que el diagrama resume:
 - Todo plan nuevo o ajustado pasa por Seguridad antes de guardarse. Seguridad evalúa primero
   `requiere_humano`, luego los bloqueados. El bucle Seguridad → Programador está acotado por
   `MAX_REINTENTOS_SEGURIDAD` (2 por defecto) y cada invocación tiene un límite de 25 pasos.
+- Si el mensaje registra una lesión nueva en una zona con regla, el Evaluador retira en ese
+  mismo turno, antes de cualquier pausa, los ejercicios que esa zona bloquea de la rutina
+  guardada. Nunca se guarda una rutina vacía: si no queda ningún ejercicio seguro se rehace el
+  plan o se responde que no hay un plan seguro y que consulte a un profesional.
 - HITL usa `interrupt()` de LangGraph: el estado queda en el checkpointer de Redis y la
-  conversación se reanuda con `POST /hitl/{thread_id}/reanudar`.
+  conversación se reanuda con `POST /hitl/{thread_id}/reanudar`. Mientras la pausa está
+  pendiente, `POST /chat` responde 409 (no la anula) y `GET /usuarios/{id}/rutinas/actual`
+  responde 409 "rutina en revisión". Esa ruta también responde 409 si la rutina guardada tiene
+  un ejercicio bloqueado por las lesiones activas o excluido por dolor. El mensaje de la pausa
+  depende del motivo (dolor agudo, zona sin regla u otro) y sale de plantillas fijas.
 
 ## Requisitos de la rúbrica
 
@@ -151,9 +179,9 @@ Detalles que el diagrama resume:
 | RAG | [app/rag](app/rag): búsqueda híbrida en Qdrant (embeddings densos de sentence-transformers + BM25 disperso de fastembed, fusión RRF en el servidor, filtros por metadatos). Corpus: catálogo y guías propias en [data/guias](data/guias). Ingesta: [scripts/ingerir.py](scripts/ingerir.py) |
 | Agentes con Supervisor | [app/agentes/grafo.py](app/agentes/grafo.py): Supervisor que enruta a Evaluador, Programador, Progreso, Seguridad, HITL y Síntesis (diagrama arriba) |
 | API | [app/api/rutas.py](app/api/rutas.py): `POST /usuarios`, `POST /chat`, `GET /usuarios/{id}/perfil`, `POST /usuarios/{id}/entrenos`, `GET /usuarios/{id}/rutinas/actual`, `POST /hitl/{thread_id}/reanudar`, `GET /health`; OpenAPI con ejemplos en `/docs` |
-| Asincronía | Rutas `async`, SQLAlchemy async (asyncpg), `AsyncRedisSaver`, `AsyncQdrantClient`, llamadas al LLM con `ainvoke`; los embeddings corren en un hilo aparte (`en_hilo` en [app/rag/codificadores.py](app/rag/codificadores.py)) |
+| Asincronía | Rutas `async`, SQLAlchemy async (asyncpg), `AsyncRedisSaver`, `AsyncQdrantClient`, llamadas al LLM con `ainvoke`; los embeddings corren en un hilo aparte (`en_hilo` en [app/rag/codificadores.py](app/rag/codificadores.py)); el filtro de seguridad usa un índice zona → ids bloqueados que se calcula una vez, fuera del event loop ([app/safety/reglas.py](app/safety/reglas.py)) |
 | Checkpointer | [app/agentes/checkpointer.py](app/agentes/checkpointer.py): `AsyncRedisSaver` con serializador que conserva los tipos del estado; Redis con AOF y volumen ([docker-compose.yml](docker-compose.yml)); comprobación de reinicio con [scripts/verificar_persistencia_redis.py](scripts/verificar_persistencia_redis.py) |
-| Pydantic | Esquemas de la API ([app/api/esquemas.py](app/api/esquemas.py)), modelos de dominio ([app/domain/modelos.py](app/domain/modelos.py)), herramientas ([app/herramientas/esquemas.py](app/herramientas/esquemas.py)), salidas estructuradas del LLM y configuración con pydantic-settings ([app/settings.py](app/settings.py)) |
+| Pydantic | Esquemas de la API ([app/api/esquemas.py](app/api/esquemas.py)), modelos de dominio ([app/domain/modelos.py](app/domain/modelos.py)), herramientas validadas en tiempo de ejecución con `pydantic.validate_call` (entradas y salidas, [app/herramientas/funciones.py](app/herramientas/funciones.py); `volumen_semanal` resume las series por músculo de cada rutina nueva), salidas estructuradas del LLM y configuración con pydantic-settings ([app/settings.py](app/settings.py)) |
 | Observabilidad | [app/observabilidad.py](app/observabilidad.py): Phoenix + OpenInference; cada petición a `/chat` y `/hitl/.../reanudar` abre un span con `thread_id` y `usuario_id`, del que cuelgan los spans del grafo y del LLM |
 | 5 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding, ajuste semanal, lesión activa (dos pruebas), dolor agudo y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
 | README y diagrama | Este archivo (diagrama Mermaid del grafo) |
@@ -201,7 +229,7 @@ termine en `_test`; el compose crea `coach_test`) y se omiten si no está defini
 Usan el stack real del compose y Gemini real, así que consumen cuota de tu clave:
 
 ```bash
-bash run.sh   # o .\run.ps1: deja el stack levantado
+bash run.sh   # o powershell -ExecutionPolicy Bypass -File .\run.ps1: deja el stack levantado
 export TEST_DATABASE_URL=postgresql+asyncpg://coach:coach@localhost:5432/coach_test
 pytest tests/sistema -m sistema -v
 ```
