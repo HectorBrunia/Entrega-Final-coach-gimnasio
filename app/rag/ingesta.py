@@ -54,8 +54,32 @@ def documento_desde_ejercicio(e: Ejercicio) -> Documento:
     )
 
 
+class ColeccionIncompatible(RuntimeError):
+    """La coleccion existente no tiene la configuracion de vectores esperada."""
+
+
+async def _verificar_config(cliente: AsyncQdrantClient, nombre: str, dim: int) -> None:
+    params = (await cliente.get_collection(nombre)).config.params
+    problemas = []
+    densos = params.vectors if isinstance(params.vectors, dict) else {}
+    if VECTOR_DENSO not in densos:
+        problemas.append(f"falta el vector denso '{VECTOR_DENSO}'")
+    elif densos[VECTOR_DENSO].size != dim:
+        problemas.append(f"vector denso de tamano {densos[VECTOR_DENSO].size}, se esperaba {dim}")
+    dispersos = params.sparse_vectors or {}
+    if VECTOR_DISPERSO not in dispersos:
+        problemas.append(f"falta el vector disperso '{VECTOR_DISPERSO}'")
+    elif dispersos[VECTOR_DISPERSO].modifier != Modifier.IDF:
+        problemas.append("el vector disperso no usa el modificador IDF")
+    if problemas:
+        raise ColeccionIncompatible(
+            f"La coleccion '{nombre}' es incompatible ({'; '.join(problemas)}). "
+            "Eliminala (drop) y vuelve a ejecutar la ingesta."
+        )
+
+
 async def asegurar_coleccion(cliente: AsyncQdrantClient, nombre: str, dim: int) -> None:
-    """Crea la coleccion (vector denso + disperso) solo si no existe."""
+    """Crea la coleccion si no existe; si existe, verifica que su configuracion sea compatible."""
     if not await cliente.collection_exists(nombre):
         try:
             await cliente.create_collection(
@@ -64,9 +88,10 @@ async def asegurar_coleccion(cliente: AsyncQdrantClient, nombre: str, dim: int) 
                 sparse_vectors_config={VECTOR_DISPERSO: SparseVectorParams(modifier=Modifier.IDF)},
             )
         except Exception:
-            # carrera con otro proceso: si ya existe, es exito
+            # carrera con otro proceso: si ya existe, se verifica abajo
             if not await cliente.collection_exists(nombre):
                 raise
+    await _verificar_config(cliente, nombre, dim)
     for campo in CAMPOS_FILTRO:
         await cliente.create_payload_index(
             nombre, f"metadatos.{campo}", PayloadSchemaType.KEYWORD

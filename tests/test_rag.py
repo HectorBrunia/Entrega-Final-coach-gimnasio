@@ -76,3 +76,34 @@ def test_codificador_disperso_recibe_idioma_de_settings(settings_rag, monkeypatc
     codificadores.disperso_desde_settings(settings_rag.model_copy(update={"bm25_idioma": "portuguese"}))
     codificadores.disperso_desde_settings(settings_rag)
     assert recibidos == ["portuguese", "spanish"]
+
+
+async def test_coleccion_existente_sin_idf_lanza_incompatible(cliente_qdrant, settings_rag):
+    from qdrant_client.models import Distance, SparseVectorParams, VectorParams
+
+    from app.rag.ingesta import ColeccionIncompatible, asegurar_coleccion
+
+    nombre = settings_rag.qdrant_collection
+    await cliente_qdrant.create_collection(
+        nombre,
+        vectors_config={"denso": VectorParams(size=16, distance=Distance.COSINE)},
+        sparse_vectors_config={"disperso": SparseVectorParams()},
+    )
+    with pytest.raises(ColeccionIncompatible, match=nombre):
+        await asegurar_coleccion(cliente_qdrant, nombre, 16)
+
+
+async def test_coleccion_existente_compatible_no_se_recrea(cliente_qdrant, settings_rag, coleccion_prueba):
+    from app.rag.ingesta import asegurar_coleccion
+
+    antes = await cliente_qdrant.count(settings_rag.qdrant_collection)
+    await asegurar_coleccion(cliente_qdrant, settings_rag.qdrant_collection, 16)
+    despues = await cliente_qdrant.count(settings_rag.qdrant_collection)
+    assert antes.count == despues.count == 3  # los datos siguen ahi
+
+
+async def test_coleccion_existente_con_dimension_distinta_lanza_incompatible(cliente_qdrant, settings_rag, coleccion_prueba):
+    from app.rag.ingesta import ColeccionIncompatible, asegurar_coleccion
+
+    with pytest.raises(ColeccionIncompatible):
+        await asegurar_coleccion(cliente_qdrant, settings_rag.qdrant_collection, 32)
