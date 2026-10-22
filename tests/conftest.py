@@ -146,3 +146,11 @@ async def coleccion_prueba(cliente_qdrant, settings_rag, denso_falso):
     await ingerir(docs, settings_rag, **inyeccion)
     yield inyeccion
     await cliente_qdrant.delete_collection(settings_rag.qdrant_collection)
+
+
+@pytest.fixture(autouse=True)
+def _sin_exportar_trazas(monkeypatch):
+    """Los lifespan de las pruebas no deben configurar un exportador hacia un Phoenix real."""
+    import app.observabilidad as obs
+
+    monkeypatch.setattr(obs, "configurar_trazas", lambda _s: None)

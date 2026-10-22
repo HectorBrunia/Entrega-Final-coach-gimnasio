@@ -83,6 +83,12 @@ async def _construir_grafo(cfg, repo, saver, *, catalogo):
     return await construir_grafo(cfg, repo, saver, catalogo=catalogo)
 
 
+def _configurar_trazas(settings: Settings) -> None:
+    from app import observabilidad
+
+    observabilidad.configurar_trazas(settings)
+
+
 def _cargar_catalogo(settings: Settings) -> dict[str, Ejercicio] | None:
     from app.catalogo.cargador import cargar_catalogo
 
@@ -127,6 +133,7 @@ class Constructores:
     motor: Callable[[str], Any] = _crear_motor
     checkpointer: Callable[[str], AbstractAsyncContextManager] = _abrir_checkpointer
     grafo: Callable[..., Awaitable[Any]] = _construir_grafo
+    trazas: Callable[[Settings], None] = _configurar_trazas
 
 
 def crear_app(
@@ -149,6 +156,10 @@ def crear_app(
     async def lifespan(app: FastAPI):
         async with AsyncExitStack() as pila:
             cfg = settings or get_settings()
+            try:  # las trazas nunca detienen ni degradan el arranque
+                ctor.trazas(cfg)
+            except Exception as exc:
+                logger.warning("No se configuraron las trazas: %s", type(exc).__name__)
             motor = None
             if app.state.repo is None:
                 try:

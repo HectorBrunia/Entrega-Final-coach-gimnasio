@@ -16,6 +16,7 @@ from app.api.esquemas import (
     PerfilSalida, ReanudarEntrada, RegistroEntrenoEntrada, RutinaSalida, UsuarioSalida,
 )
 from app.domain.modelos import EntrenoRegistro
+from app.observabilidad import contexto_traza
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,13 @@ async def crear_usuario(
 )
 async def chat(request: Request, entrada: MensajeEntrada) -> MensajeSalida:
     grafo = _dep(request, "grafo", "Coach")
-    salida = await grafo.ainvoke(
-        {"usuario_id": entrada.usuario_id, "mensaje": entrada.mensaje},
-        config_hilo(entrada.usuario_id),
-    )
+    hilo = str(entrada.usuario_id)  # thread_id == str(usuario_id)
+    logger.info("chat thread_id=%s usuario_id=%s", hilo, entrada.usuario_id)
+    with contexto_traza("chat", thread_id=hilo, usuario_id=hilo):
+        salida = await grafo.ainvoke(
+            {"usuario_id": entrada.usuario_id, "mensaje": entrada.mensaje},
+            config_hilo(entrada.usuario_id),
+        )
     return _respuesta_grafo(salida, str(entrada.usuario_id))
 
 
@@ -144,7 +148,9 @@ async def reanudar(request: Request, thread_id: UUID, entrada: ReanudarEntrada) 
     estado = await grafo.aget_state(config)
     if not estado.next:
         raise SinPausaPendiente()
-    salida = await grafo.ainvoke(Command(resume=entrada.revision), config)
+    logger.info("hitl thread_id=%s usuario_id=%s", thread_id, thread_id)
+    with contexto_traza("hitl_reanudar", thread_id=str(thread_id), usuario_id=str(thread_id)):
+        salida = await grafo.ainvoke(Command(resume=entrada.revision), config)
     return _respuesta_grafo(salida, str(thread_id))
 
 
