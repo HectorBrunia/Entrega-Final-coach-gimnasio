@@ -162,3 +162,72 @@ def test_presses_de_riesgo_lumbar_quedan_bloqueados(catalogo, ejercicio_id):
     res = filtrar_por_lesiones(list(catalogo.values()), [_lesion("zona_lumbar")])
     assert (ejercicio_id, "zona_lumbar") in res.bloqueados
     assert ejercicio_id not in {e.id for e in res.permitidos}
+
+
+
+# --- I3: el indice precalculado da exactamente lo mismo que la fuerza bruta --------------
+
+def test_indice_coincide_con_ejercicio_bloqueado_en_cada_zona(catalogo):
+    from app.safety.reglas import construir_indice
+
+    indice = construir_indice(catalogo)
+    assert set(indice.por_zona) == {z.strip().lower() for z in REGLAS_LESION}
+    for zona, regla in REGLAS_LESION.items():
+        esperado = {e.id for e in catalogo.values() if ejercicio_bloqueado(e, regla)}
+        assert indice.por_zona[zona.strip().lower()] == esperado, zona
+
+
+def test_filtrar_con_indice_igual_que_sin_indice(catalogo):
+    from itertools import combinations
+
+    from app.safety.reglas import ids_bloqueados, indice_bloqueo
+
+    indice = indice_bloqueo(catalogo)
+    ejercicios = list(catalogo.values())
+    zonas = sorted(REGLAS_LESION)
+    for n in (1, 2, len(zonas)):
+        for combo in combinations(zonas, n):
+            lesiones = [_lesion(z) for z in combo]
+            rapido = filtrar_por_lesiones(ejercicios, lesiones, indice)
+            lento = filtrar_por_lesiones(ejercicios, lesiones)
+            assert [e.id for e in rapido.permitidos] == [e.id for e in lento.permitidos]
+            assert rapido.bloqueados == lento.bloqueados
+            assert ids_bloqueados(lesiones, indice) == {i for i, _ in lento.bloqueados}
+
+
+def test_indice_se_calcula_una_vez_por_catalogo(catalogo):
+    from app.safety.reglas import indice_bloqueo
+
+    assert indice_bloqueo(catalogo) is indice_bloqueo(catalogo)
+    assert indice_bloqueo(dict(catalogo)) is not indice_bloqueo(catalogo)
+
+
+def test_ejercicio_fuera_del_indice_se_evalua_por_fuerza_bruta(catalogo):
+    from app.safety.reglas import indice_bloqueo
+
+    nuevo = _ej("Press_Nuevo", "Press Nuevo", "shoulders")
+    res = filtrar_por_lesiones([nuevo], [_lesion("hombro_derecho")], indice_bloqueo(catalogo))
+    assert res.permitidos == [] and res.bloqueados == [("Press_Nuevo", "hombro_derecho")]
+
+
+def test_ids_bloqueados_falla_cerrado_salvo_solo_conocidas(catalogo):
+    from app.safety.reglas import ZonaLesionDesconocida, ids_bloqueados, indice_bloqueo
+
+    indice = indice_bloqueo(catalogo)
+    lesiones = [_lesion("tobillo"), _lesion("hombro_derecho")]
+    with pytest.raises(ZonaLesionDesconocida):
+        ids_bloqueados(lesiones, indice)
+    assert ids_bloqueados(lesiones, indice, solo_conocidas=True) == indice.por_zona["hombro_derecho"]
+
+
+def test_filtro_con_indice_no_bloquea_el_event_loop(catalogo):
+    # todas las zonas sobre las 876 entradas: busquedas en conjuntos, muy por debajo de 50 ms
+    import time
+
+    from app.safety.reglas import indice_bloqueo
+
+    indice = indice_bloqueo(catalogo)
+    lesiones = [_lesion(z) for z in REGLAS_LESION]
+    inicio = time.perf_counter()
+    filtrar_por_lesiones(list(catalogo.values()), lesiones, indice)
+    assert time.perf_counter() - inicio < 0.05

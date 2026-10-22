@@ -7,6 +7,7 @@ Criterio conservador: ante la duda, bloquear. Estas reglas las revisa el usuario
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
@@ -431,18 +432,88 @@ class FiltroResultado(BaseModel):
     bloqueados: list[tuple[str, str]]  # (ejercicio_id, zona)
 
 
-def filtrar_por_lesiones(ejercicios: list[Ejercicio], lesiones: list[Lesion]) -> FiltroResultado:
+class IndiceBloqueo:
+    """Precalculo zona -> ids bloqueados sobre un catalogo fijo (spec 7, sin CPU en el loop).
+
+    Se construye una vez por catalogo (ver `indice_bloqueo`) con el mismo `ejercicio_bloqueado`
+    que el camino de fuerza bruta, asi que el resultado es identico. Clase simple (no modelo
+    Pydantic) para que `validate_call` la compruebe por tipo sin copiarla.
+    """
+
+    __slots__ = ("por_zona", "ids")
+
+    def __init__(self, por_zona: Mapping[str, frozenset[str]], ids: frozenset[str]):
+        self.por_zona = dict(por_zona)
+        self.ids = ids  # ids indexados; un ejercicio fuera de ellos se evalua por fuerza bruta
+
+
+# Cache por objeto catalogo (identidad). Se guarda la referencia para que el id no se reutilice.
+_INDICES: dict[int, tuple[object, IndiceBloqueo]] = {}
+
+
+def construir_indice(catalogo: Mapping[str, Ejercicio]) -> IndiceBloqueo:
     reglas = _reglas_normalizadas()
+    return IndiceBloqueo(
+        por_zona={
+            zona: frozenset(e.id for e in catalogo.values() if ejercicio_bloqueado(e, regla))
+            for zona, regla in reglas.items()
+        },
+        ids=frozenset(e.id for e in catalogo.values()),
+    )
+
+
+def indice_bloqueo(catalogo: Mapping[str, Ejercicio]) -> IndiceBloqueo:
+    """Indice del catalogo, calculado una sola vez por objeto catalogo."""
+    previo = _INDICES.get(id(catalogo))
+    if previo is not None and previo[0] is catalogo:
+        return previo[1]
+    indice = construir_indice(catalogo)
+    _INDICES[id(catalogo)] = (catalogo, indice)
+    return indice
+
+
+def _zonas_activas(lesiones: list[Lesion], zonas_con_regla) -> list[str]:
+    """Zonas activas normalizadas; falla cerrado si alguna no tiene regla."""
     zonas = list(dict.fromkeys(_normalizar(les.zona) for les in lesiones if les.activa))
     for z in zonas:
-        if z not in reglas:
+        if z not in zonas_con_regla:
             raise ZonaLesionDesconocida(f"Zona de lesion sin regla de seguridad: {z!r}")
+    return zonas
+
+
+def ids_bloqueados(
+    lesiones: list[Lesion], indice: IndiceBloqueo, *, solo_conocidas: bool = False
+) -> frozenset[str]:
+    """Union de los ids del catalogo indexado que bloquean las lesiones activas.
+
+    Falla cerrado (ZonaLesionDesconocida) ante una zona activa sin regla, salvo con
+    `solo_conocidas=True`, que ignora esas zonas: sirve para depurar lo que si se sabe
+    bloquear mientras la zona desconocida se escala a humano por otra via.
+    """
+    if solo_conocidas:
+        lesiones = [les for les in lesiones if _normalizar(les.zona) in indice.por_zona]
+    zonas = _zonas_activas(lesiones, indice.por_zona)
+    return frozenset().union(*(indice.por_zona[z] for z in zonas))
+
+
+def filtrar_por_lesiones(
+    ejercicios: list[Ejercicio],
+    lesiones: list[Lesion],
+    indice: IndiceBloqueo | None = None,
+) -> FiltroResultado:
+    """Separa permitidos y bloqueados. Con `indice` usa busquedas en conjuntos; sin el (o para
+    un ejercicio que el indice no cubre) evalua las reglas directamente. Mismo resultado."""
+    reglas = _reglas_normalizadas()
+    zonas = _zonas_activas(lesiones, reglas)
     permitidos: list[Ejercicio] = []
     bloqueados: list[tuple[str, str]] = []
     for ej in ejercicios:
-        zonas_bloqueantes = [z for z in zonas if ejercicio_bloqueado(ej, reglas[z])]
+        if indice is not None and ej.id in indice.ids:
+            zonas_bloqueantes = [z for z in zonas if ej.id in indice.por_zona[z]]
+        else:
+            zonas_bloqueantes = [z for z in zonas if ejercicio_bloqueado(ej, reglas[z])]
         if zonas_bloqueantes:
             bloqueados.extend((ej.id, z) for z in zonas_bloqueantes)
         else:
             permitidos.append(ej)
-    return FiltroResultado(permitidos=permitidos, bloqueados=bloqueados)
+    return FiltroResultado.model_construct(permitidos=permitidos, bloqueados=bloqueados)
