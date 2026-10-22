@@ -81,6 +81,15 @@ curl http://localhost:8000/usuarios/<uuid>/rutinas/actual
 `ejercicio_id` es el id del catálogo (`data/catalogo/exercises.json`); un id desconocido
 responde 422.
 
+`GET /usuarios/{id}/rutinas/actual` responde:
+
+- 404 si el usuario aún no tiene rutina.
+- 409 mientras hay una pausa HITL pendiente ("rutina en revisión").
+- 409 si la rutina guardada contiene un ejercicio bloqueado por una lesión activa o excluido
+  por dolor.
+- 503 si el grafo o Redis no están disponibles. Sin el estado de la conversación no se puede
+  saber si hay una revisión pendiente, así que falla cerrado.
+
 El equipo del perfil se guarda con el vocabulario del catálogo (`barbell`, `dumbbell`,
 `machine`, `cable`, `kettlebells`, `bands`, `cuerpo`, …): los sinónimos en español
 ("barra", "mancuernas", "máquinas", "poleas", "peso corporal", …) se traducen al validar el

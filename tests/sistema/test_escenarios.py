@@ -230,7 +230,13 @@ async def test_dolor_agudo_pausa_y_no_vuelve_a_recomendar_el_ejercicio(
         estado = await app_sistema.state.grafo.aget_state(config)
         assert estado.next == ("hitl",)
         assert PRESS_BANCA in estado.values["ejercicios_excluidos"]
-        assert PRESS_BANCA not in _ids(await _rutina(cliente, usuario_id))
+        # durante la pausa la API no sirve la rutina (409 "rutina en revision"); la version
+        # guardada se comprueba en el repositorio
+        en_pausa = await cliente.get(f"/usuarios/{usuario_id}/rutinas/actual")
+        assert en_pausa.status_code == 409, en_pausa.text
+        guardada = await repo.rutina_actual(UUID(usuario_id))
+        assert guardada is not None
+        assert PRESS_BANCA not in {p.ejercicio_id for d in guardada.dias for p in d.ejercicios}
 
         r = await cliente.post(f"/hitl/{usuario_id}/reanudar",
                                json={"revision": "Revisado por fisioterapeuta: seguir sin ese ejercicio."})
