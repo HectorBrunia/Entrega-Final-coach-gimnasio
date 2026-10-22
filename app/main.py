@@ -2,7 +2,9 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -54,11 +56,38 @@ def _registrar_manejadores(app: FastAPI) -> None:
         return _json(500, "Error interno")
 
 
+# Errores de configuracion que deben detener el arranque en vez de degradarlo.
+ERRORES_FATALES_ARRANQUE: tuple[type[BaseException], ...] = ()
+
+
+def _crear_motor(url: str):
+    from app.persistencia.repositorios import crear_motor
+
+    return crear_motor(url)
+
+
+@asynccontextmanager
+async def _abrir_checkpointer(redis_url: str):
+    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+
+    async with AsyncRedisSaver.from_conn_string(redis_url) as saver:
+        await saver.asetup()
+        yield saver
+
+
+async def _construir_grafo(cfg, repo, saver, *, catalogo):
+    from app.agentes.grafo import construir_grafo
+
+    return await construir_grafo(cfg, repo, saver, catalogo=catalogo)
+
+
 def _cargar_catalogo(settings: Settings) -> dict[str, Ejercicio] | None:
     from app.catalogo.cargador import cargar_catalogo
 
     try:
         return {e.id: e for e in cargar_catalogo(settings.catalogo_path)}
+    except ERRORES_FATALES_ARRANQUE:
+        raise
     except Exception as exc:  # archivo ausente o catalogo invalido: las rutas responden 503
         logger.error("No se pudo cargar el catálogo: %s", type(exc).__name__)
         return None
@@ -86,6 +115,15 @@ def _comprobaciones(settings: Settings, motor) -> dict[str, Comprobacion]:
     return {"postgres": postgres, "redis": redis, "qdrant": qdrant}
 
 
+@dataclass(frozen=True)
+class Constructores:
+    """Fabricas que usa el lifespan; se inyectan en pruebas para no depender de servicios."""
+
+    motor: Callable[[str], Any] = _crear_motor
+    checkpointer: Callable[[str], AbstractAsyncContextManager] = _abrir_checkpointer
+    grafo: Callable[..., Awaitable[Any]] = _construir_grafo
+
+
 def crear_app(
     settings: Settings | None = None,
     *,
@@ -93,8 +131,14 @@ def crear_app(
     repo=None,
     catalogo: dict[str, Ejercicio] | None = None,
     comprobaciones: dict[str, Comprobacion] | None = None,
+    constructores: Constructores | None = None,
 ) -> FastAPI:
-    """Las dependencias inyectadas se usan tal cual; las ausentes se construyen en el lifespan."""
+    """Las dependencias inyectadas se usan tal cual; las ausentes se construyen en el lifespan.
+
+    Si un servicio no se puede construir, la app arranca degradada (las rutas afectadas
+    responden 503), salvo que el error sea de `ERRORES_FATALES_ARRANQUE`.
+    """
+    ctor = constructores or Constructores()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -102,27 +146,36 @@ def crear_app(
             cfg = settings or get_settings()
             motor = None
             if app.state.repo is None:
-                from app.persistencia.repositorios import RepositorioDominio, crear_motor
+                try:
+                    from app.persistencia.repositorios import RepositorioDominio
 
-                motor = crear_motor(cfg.database_url)
-                pila.push_async_callback(motor.dispose)
-                app.state.repo = RepositorioDominio(async_sessionmaker(motor, expire_on_commit=False))
+                    motor = ctor.motor(cfg.database_url)
+                    pila.push_async_callback(motor.dispose)
+                    app.state.repo = RepositorioDominio(
+                        async_sessionmaker(motor, expire_on_commit=False)
+                    )
+                except ERRORES_FATALES_ARRANQUE:
+                    raise
+                except Exception as exc:
+                    logger.error("No se pudo construir el repositorio: %s", type(exc).__name__)
             if app.state.catalogo is None:
                 app.state.catalogo = _cargar_catalogo(cfg)
             if app.state.comprobaciones is None and motor is not None:
                 app.state.comprobaciones = _comprobaciones(cfg, motor)
-            if app.state.grafo is None and app.state.catalogo is not None:
-                from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-
-                from app.agentes.grafo import construir_grafo
-
-                saver = await pila.enter_async_context(
-                    AsyncRedisSaver.from_conn_string(cfg.redis_url)
-                )
-                await saver.asetup()
-                app.state.grafo = await construir_grafo(
-                    cfg, app.state.repo, saver, catalogo=app.state.catalogo
-                )
+            if (
+                app.state.grafo is None
+                and app.state.catalogo is not None
+                and app.state.repo is not None
+            ):
+                try:
+                    saver = await pila.enter_async_context(ctor.checkpointer(cfg.redis_url))
+                    app.state.grafo = await ctor.grafo(
+                        cfg, app.state.repo, saver, catalogo=app.state.catalogo
+                    )
+                except ERRORES_FATALES_ARRANQUE:
+                    raise
+                except Exception as exc:
+                    logger.error("No se pudo construir el grafo: %s", type(exc).__name__)
             yield
 
     app = FastAPI(

@@ -251,3 +251,135 @@ async def test_health_con_un_servicio_caido_devuelve_503_sin_detalles():
 def test_importar_app_no_requiere_variables_de_entorno():
     import app.main as m
     assert m.app.title
+
+
+# --- Lifespan (se ejecuta de verdad con lifespan_context) -----------------------------
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+import app.main as main_mod  # noqa: E402
+from app.main import Constructores  # noqa: E402
+from tests.conftest import Settings  # noqa: E402
+
+
+def _cfg() -> Settings:
+    return Settings(
+        database_url="postgresql+asyncpg://x:x@localhost/x", redis_url="redis://localhost:6379/0",
+        qdrant_url="http://localhost:6333", qdrant_collection="c", google_api_key="x",
+        gemini_model="x", gemini_rpm=1, phoenix_collector_endpoint="http://localhost:6006",
+        embedding_model="m",
+    )
+
+
+class MotorFalso:
+    def __init__(self):
+        self.liberado = False
+
+    async def dispose(self):
+        self.liberado = True
+
+
+def _ctor_que_falla_en_checkpointer(motor=None):
+    @asynccontextmanager
+    async def checkpointer(_url):
+        raise ConnectionError("redis://usuario:secreto@host caido")
+        yield  # pragma: no cover
+
+    async def grafo(*a, **k):
+        raise AssertionError("no debe construirse sin checkpointer")
+
+    return Constructores(motor=lambda _u: motor or MotorFalso(), checkpointer=checkpointer,
+                         grafo=grafo)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_no_sobrescribe_dependencias_inyectadas():
+    grafo, repo, catalogo = GrafoFalso(), RepoFalso(), _catalogo()
+
+    def prohibido(*a, **k):
+        raise AssertionError("no debe construirse nada")
+
+    app = crear_app(_cfg(), grafo=grafo, repo=repo, catalogo=catalogo,
+                    constructores=Constructores(motor=prohibido, checkpointer=prohibido,
+                                                grafo=prohibido))
+    async with app.router.lifespan_context(app):
+        assert app.state.grafo is grafo
+        assert app.state.repo is repo
+        assert app.state.catalogo is catalogo
+
+
+@pytest.mark.asyncio
+async def test_lifespan_con_checkpointer_caido_arranca_degradado():
+    async def redis_caido():
+        raise ConnectionError("secreto")
+
+    app = crear_app(_cfg(), repo=RepoFalso(), catalogo=_catalogo(),
+                    comprobaciones={"postgres": _ok, "redis": redis_caido, "qdrant": _ok},
+                    constructores=_ctor_que_falla_en_checkpointer())
+    async with app.router.lifespan_context(app):
+        assert app.state.grafo is None
+        async with _cliente(app) as c:
+            chat = await c.post("/chat", json={"usuario_id": UID, "mensaje": "hola"})
+            reanudar = await c.post(f"/hitl/{UID}/reanudar", json={"revision": "ok"})
+            salud = await c.get("/health")
+    assert chat.status_code == 503 and reanudar.status_code == 503
+    assert "secreto" not in chat.text
+    assert salud.status_code == 503
+    assert salud.json()["servicios"] == {"postgres": "ok", "redis": "error", "qdrant": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_lifespan_construye_grafo_y_libera_el_motor_al_cerrar():
+    motor = MotorFalso()
+    cerrado = []
+
+    @asynccontextmanager
+    async def checkpointer(_url):
+        yield "saver"
+        cerrado.append(True)
+
+    async def grafo(cfg, repo, saver, *, catalogo):
+        assert saver == "saver"
+        return GrafoFalso()
+
+    app = crear_app(_cfg(), catalogo=_catalogo(),
+                    constructores=Constructores(motor=lambda _u: motor, checkpointer=checkpointer,
+                                                grafo=grafo))
+    async with app.router.lifespan_context(app):
+        assert isinstance(app.state.grafo, GrafoFalso)
+        assert app.state.repo is not None
+        assert not motor.liberado
+    assert motor.liberado and cerrado
+
+
+@pytest.mark.asyncio
+async def test_lifespan_sin_poder_construir_el_motor_arranca_y_rutas_dan_503():
+    def motor_roto(_url):
+        raise OSError("sin driver")
+
+    app = crear_app(_cfg(), catalogo=_catalogo(),
+                    constructores=Constructores(motor=motor_roto))
+    async with app.router.lifespan_context(app):
+        async with _cliente(app) as c:
+            r = await c.get(f"/usuarios/{UID}/perfil")
+    assert r.status_code == 503
+
+
+class ErrorFatalDePrueba(Exception):
+    pass
+
+
+@pytest.mark.asyncio
+async def test_error_fatal_de_arranque_detiene_el_lifespan(monkeypatch):
+    monkeypatch.setattr(main_mod, "ERRORES_FATALES_ARRANQUE", (ErrorFatalDePrueba,))
+
+    @asynccontextmanager
+    async def checkpointer(_url):
+        raise ErrorFatalDePrueba("config invalida")
+        yield  # pragma: no cover
+
+    app = crear_app(_cfg(), repo=RepoFalso(), catalogo=_catalogo(),
+                    constructores=Constructores(checkpointer=checkpointer))
+    with pytest.raises(ErrorFatalDePrueba):
+        async with app.router.lifespan_context(app):
+            pass  # pragma: no cover
