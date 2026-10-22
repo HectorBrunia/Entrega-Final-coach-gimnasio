@@ -5,7 +5,7 @@ from alembic import context
 
 from app.persistencia.repositorios import crear_motor
 from app.persistencia.tablas import Base
-from app.settings import Settings
+from app.settings import SettingsSinLLM as Settings  # migrar no necesita la clave de Gemini
 
 config = context.config
 if config.config_file_name is not None:

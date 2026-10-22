@@ -1,6 +1,15 @@
 from pydantic import BaseModel
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import FieldCondition, Filter, Fusion, FusionQuery, MatchValue, Prefetch
+from qdrant_client.models import (
+    FieldCondition,
+    Filter,
+    Fusion,
+    FusionQuery,
+    IsEmptyCondition,
+    MatchValue,
+    PayloadField,
+    Prefetch,
+)
 
 from app.domain.modelos import Nivel
 from app.rag.codificadores import (
@@ -29,8 +38,14 @@ def _filtro_payload(f: FiltrosBusqueda) -> Filter | None:
         "nivel": f.nivel.value if f.nivel else None,
         "musculo": f.musculo,
     }
+    # Cada filtro restringe solo a los documentos que tienen ese metadato (ejercicios del
+    # catalogo). Las guias no lo tienen porque aplican a cualquier nivel/equipo/musculo: sin
+    # el `is_empty`, un filtro por nivel las excluiria siempre de la recuperacion.
     must = [
-        FieldCondition(key=f"metadatos.{k}", match=MatchValue(value=v))
+        Filter(should=[
+            FieldCondition(key=f"metadatos.{k}", match=MatchValue(value=v)),
+            IsEmptyCondition(is_empty=PayloadField(key=f"metadatos.{k}")),
+        ])
         for k, v in valores.items()
         if v is not None
     ]

@@ -34,6 +34,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Las pruebas de sistema (stack real + Gemini) no corren por defecto:
+# ejecutarlas con `pytest tests/sistema -m sistema` (el ultimo -m sustituye a este).
+addopts = "-m 'not sistema'"
 markers = [
     "integracion: pruebas de integracion que requieren servicios externos (Postgres, Qdrant, Redis)",
+    "sistema: pruebas de extremo a extremo con docker compose y Gemini real (trazas en Phoenix)",
 ]

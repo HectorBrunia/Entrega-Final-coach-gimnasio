@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     embedding_model: str
     bm25_idioma: str = "spanish"
     catalogo_path: Path = Path("data/catalogo/exercises.json")
+    guias_dir: Path = Path("data/guias")
+
+
+class SettingsSinLLM(Settings):
+    """Settings para scripts que no llaman al LLM (ingesta, evaluacion de recuperacion).
+
+    Lee lo mismo que `Settings` (entorno y .env), pero no exige la clave ni el modelo de
+    Gemini: la ingesta y la recuperacion solo usan Qdrant y los codificadores locales.
+    """
+
+    google_api_key: SecretStr = SecretStr("")
+    gemini_model: str = ""
+    gemini_rpm: int = 1
 
 
 @lru_cache

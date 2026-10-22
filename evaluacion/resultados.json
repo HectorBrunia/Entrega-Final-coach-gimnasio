@@ -1,0 +1,310 @@
+{
+  "fecha": "2026-10-22T19:12:58+00:00",
+  "golden_set": "golden_set.json",
+  "k": 5,
+  "coleccion": "ejercicios_test",
+  "modelo_embeddings": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "segundos": 21.0,
+  "resumen": {
+    "recuperacion": {
+      "casos": 13,
+      "aciertos": 12,
+      "hit_rate@5": 0.923,
+      "mrr@5": 0.731
+    },
+    "seguridad_determinista": {
+      "casos": 5,
+      "violaciones": 0,
+      "sobrebloqueos": 0,
+      "ids_fuera_del_catalogo": 0
+    },
+    "seguridad_grafo": {
+      "estado": "omitida",
+      "motivo": "configuracion incompleta para el grafo (faltan: google_api_key)"
+    },
+    "violaciones_de_seguridad": 0
+  },
+  "recuperacion": {
+    "estado": "ejecutada",
+    "casos": [
+      {
+        "id": "R01",
+        "consulta": "¿Cómo progreso la carga cuando completo todas las repeticiones del rango?",
+        "esperados": [
+          "progresion#como-progresar"
+        ],
+        "recuperados": [
+          "progresion#como-progresar",
+          "tecnica_basica#principios-generales",
+          "progresion#idea-central",
+          "progresion#por-nivel",
+          "consideraciones_por_zona_lesion#criterios-comunes"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R02",
+        "consulta": "¿Cuántos días por semana debería entrenar un principiante?",
+        "esperados": [
+          "progresion#por-nivel"
+        ],
+        "recuperados": [
+          "progresion#por-nivel",
+          "progresion#como-progresar",
+          "tecnica_basica#principios-generales",
+          "consideraciones_por_zona_lesion#zona-lumbar",
+          "Running_Treadmill"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R03",
+        "consulta": "Tengo molestias en el hombro al levantar el brazo por encima de la cabeza",
+        "esperados": [
+          "consideraciones_por_zona_lesion#hombro"
+        ],
+        "recuperados": [
+          "consideraciones_por_zona_lesion#hombro",
+          "Shoulder_Raise",
+          "tecnica_basica#principios-generales",
+          "Round_The_World_Shoulder_Stretch",
+          "progresion#como-progresar"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R04",
+        "consulta": "Me molesta la rodilla al hacer sentadillas profundas y zancadas",
+        "esperados": [
+          "consideraciones_por_zona_lesion#rodilla"
+        ],
+        "recuperados": [
+          "consideraciones_por_zona_lesion#rodilla",
+          "Sit-Up",
+          "tecnica_basica#patrones-frecuentes",
+          "Lying_Bent_Leg_Groin",
+          "Side-Lying_Floor_Stretch"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R05",
+        "consulta": "Tengo dolor en la zona lumbar, ¿cómo adapto el entrenamiento de espalda?",
+        "esperados": [
+          "consideraciones_por_zona_lesion#zona-lumbar"
+        ],
+        "recuperados": [
+          "consideraciones_por_zona_lesion#criterios-comunes",
+          "consideraciones_por_zona_lesion#zona-lumbar",
+          "consideraciones_por_zona_lesion#muneca-y-codo",
+          "tecnica_basica#patrones-frecuentes",
+          "progresion#idea-central"
+        ],
+        "acierto": true,
+        "rango": 2
+      },
+      {
+        "id": "R06",
+        "consulta": "¿Cómo debo respirar durante la fase de mayor esfuerzo al levantar pesas?",
+        "esperados": [
+          "tecnica_basica#principios-generales"
+        ],
+        "recuperados": [
+          "tecnica_basica#principios-generales",
+          "Hanging_Leg_Raise",
+          "progresion#como-progresar",
+          "Push-Ups_With_Feet_Elevated",
+          "tecnica_basica#patrones-frecuentes"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R07",
+        "consulta": "Técnica de la bisagra de cadera en el peso muerto con la barra pegada al cuerpo",
+        "esperados": [
+          "tecnica_basica#patrones-frecuentes"
+        ],
+        "recuperados": [
+          "Sumo_Deadlift_with_Chains",
+          "tecnica_basica#patrones-frecuentes",
+          "tecnica_basica#principios-generales",
+          "Stiff-Legged_Barbell_Deadlift",
+          "Romanian_Deadlift"
+        ],
+        "acierto": true,
+        "rango": 2
+      },
+      {
+        "id": "R08",
+        "consulta": "Me duele la muñeca con el agarre en extensión bajo carga",
+        "esperados": [
+          "consideraciones_por_zona_lesion#muneca-y-codo"
+        ],
+        "recuperados": [
+          "consideraciones_por_zona_lesion#muneca-y-codo",
+          "consideraciones_por_zona_lesion#hombro",
+          "Wide-Grip_Pulldown_Behind_The_Neck",
+          "Push_Press",
+          "tecnica_basica#patrones-frecuentes"
+        ],
+        "acierto": true,
+        "rango": 1
+      },
+      {
+        "id": "R09",
+        "consulta": "Mi rendimiento cae varias sesiones seguidas y noto fatiga persistente, ¿hago una descarga?",
+        "esperados": [
+          "progresion#como-progresar"
+        ],
+        "recuperados": [
+          "progresion#por-nivel",
+          "progresion#como-progresar",
+          "progresion#idea-central",
+          "consideraciones_por_zona_lesion#criterios-comunes",
+          "consideraciones_por_zona_lesion#zona-lumbar"
+        ],
+        "acierto": true,
+        "rango": 2
+      },
+      {
+        "id": "R10",
+        "consulta": "rutina fuerza nivel intermedio barra",
+        "esperados": [
+          "guia:progresion"
+        ],
+        "recuperados": [
+          "Elevated_Cable_Rows",
+          "progresion#por-nivel",
+          "tecnica_basica#patrones-frecuentes",
+          "Speed_Box_Squat",
+          "Deficit_Deadlift"
+        ],
+        "acierto": true,
+        "rango": 2
+      },
+      {
+        "id": "R11",
+        "consulta": "press militar con barra",
+        "esperados": [
+          "Standing_Military_Press",
+          "Seated_Barbell_Military_Press",
+          "Barbell_Shoulder_Press"
+        ],
+        "recuperados": [
+          "tecnica_basica#patrones-frecuentes",
+          "Seated_Barbell_Military_Press",
+          "Machine_Shoulder_Military_Press",
+          "Kettlebell_Seesaw_Press",
+          "Calf_Press_On_The_Leg_Press_Machine"
+        ],
+        "acierto": true,
+        "rango": 2
+      },
+      {
+        "id": "R12",
+        "consulta": "sentadilla con barra en la espalda",
+        "esperados": [
+          "Barbell_Squat",
+          "Barbell_Full_Squat"
+        ],
+        "recuperados": [
+          "tecnica_basica#patrones-frecuentes",
+          "Seated_Cable_Rows",
+          "consideraciones_por_zona_lesion#rodilla",
+          "Lying_Cambered_Barbell_Row",
+          "Straight_Bar_Bench_Mid_Rows"
+        ],
+        "acierto": false,
+        "rango": null
+      },
+      {
+        "id": "R13",
+        "consulta": "dumbbell bicep curl",
+        "esperados": [
+          "Dumbbell_Bicep_Curl",
+          "Dumbbell_Alternate_Bicep_Curl"
+        ],
+        "recuperados": [
+          "Dumbbell_Bicep_Curl",
+          "One_Arm_Dumbbell_Preacher_Curl",
+          "Dumbbell_Alternate_Bicep_Curl",
+          "Flexor_Incline_Dumbbell_Curls",
+          "Two-Arm_Dumbbell_Preacher_Curl"
+        ],
+        "acierto": true,
+        "rango": 1
+      }
+    ],
+    "resumen": {
+      "casos": 13,
+      "aciertos": 12,
+      "hit_rate@5": 0.923,
+      "mrr@5": 0.731
+    }
+  },
+  "seguridad_determinista": {
+    "estado": "ejecutada",
+    "casos": [
+      {
+        "id": "S01",
+        "zona": "hombro_derecho",
+        "violaciones": [],
+        "sobrebloqueos": [],
+        "ids_fuera_del_catalogo": [],
+        "bloqueados_en_catalogo": 612,
+        "ok": true
+      },
+      {
+        "id": "S02",
+        "zona": "hombro_izquierdo",
+        "violaciones": [],
+        "sobrebloqueos": [],
+        "ids_fuera_del_catalogo": [],
+        "bloqueados_en_catalogo": 612,
+        "ok": true
+      },
+      {
+        "id": "S03",
+        "zona": "rodilla_derecha",
+        "violaciones": [],
+        "sobrebloqueos": [],
+        "ids_fuera_del_catalogo": [],
+        "bloqueados_en_catalogo": 406,
+        "ok": true
+      },
+      {
+        "id": "S04",
+        "zona": "rodilla_izquierda",
+        "violaciones": [],
+        "sobrebloqueos": [],
+        "ids_fuera_del_catalogo": [],
+        "bloqueados_en_catalogo": 406,
+        "ok": true
+      },
+      {
+        "id": "S05",
+        "zona": "zona_lumbar",
+        "violaciones": [],
+        "sobrebloqueos": [],
+        "ids_fuera_del_catalogo": [],
+        "bloqueados_en_catalogo": 649,
+        "ok": true
+      }
+    ],
+    "resumen": {
+      "casos": 5,
+      "violaciones": 0,
+      "sobrebloqueos": 0,
+      "ids_fuera_del_catalogo": 0
+    }
+  },
+  "seguridad_grafo": {
+    "estado": "omitida",
+    "motivo": "configuracion incompleta para el grafo (faltan: google_api_key)"
+  }
+}

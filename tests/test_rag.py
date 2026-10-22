@@ -107,3 +107,41 @@ async def test_coleccion_existente_con_dimension_distinta_lanza_incompatible(cli
 
     with pytest.raises(ColeccionIncompatible):
         await asegurar_coleccion(cliente_qdrant, settings_rag.qdrant_collection, 32)
+
+
+async def test_filtros_no_excluyen_documentos_sin_ese_metadato(cliente_qdrant, settings_rag, coleccion_prueba):
+    """Las guias no tienen nivel/equipo/musculo: un filtro solo restringe a los ejercicios."""
+    from app.rag.ingesta import documentos_desde_guia
+
+    guia = documentos_desde_guia("progresion", "# Guia\n\n## Por nivel\nIntermedio: rutina dividida.\n")
+    await ingerir(guia, settings_rag, **coleccion_prueba)
+    res = await buscar("rutina dividida intermedio",
+                       FiltrosBusqueda(equipo="barbell", nivel=Nivel.principiante, musculo=None),
+                       k=10, settings=settings_rag, **coleccion_prueba)
+    ids = [d.id for d in res]
+    assert "progresion#por-nivel" in ids
+    catalogo = [d for d in res if d.fuente == "catalogo"]
+    assert all(d.metadatos["nivel"] == "principiante" and d.metadatos["equipo"] == "barbell" for d in catalogo)
+
+
+def test_documentos_desde_guia_trocea_por_seccion_y_omite_fuentes():
+    from app.rag.ingesta import documentos_desde_guia
+
+    md = ("# Guía: técnica\n\n> aviso\n\n## Principios generales\n- a\n- b\n\n"
+          "## Patrones frecuentes\n- c\n\n## Fuentes\n- ACSM\n")
+    docs = documentos_desde_guia("tecnica_basica", md)
+    assert [d.id for d in docs] == ["tecnica_basica#principios-generales", "tecnica_basica#patrones-frecuentes"]
+    assert all(d.fuente == "guia:tecnica_basica" and d.metadatos == {} for d in docs)
+    assert docs[0].texto.startswith("Guía: técnica. Principios generales.")
+    assert "ACSM" not in " ".join(d.texto for d in docs)
+
+
+def test_documentos_desde_guias_reales_tienen_ids_unicos():
+    from pathlib import Path
+
+    from app.rag.ingesta import documentos_desde_guias
+
+    docs = documentos_desde_guias(Path(__file__).resolve().parent.parent / "data" / "guias")
+    ids = [d.id for d in docs]
+    assert len(ids) == len(set(ids)) and len(ids) >= 3
+    assert {"progresion#por-nivel", "consideraciones_por_zona_lesion#hombro"} <= set(ids)

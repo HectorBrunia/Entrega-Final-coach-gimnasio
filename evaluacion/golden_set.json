@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "descripcion": "Golden set del coach. Casos de recuperacion: algun documento esperado (id de documento o fuente, p. ej. 'guia:progresion') debe aparecer en el top-k. Casos de seguridad: con la lesion activa de la zona, ningun ejercicio prohibido puede pasar el filtro determinista ni aparecer en la rutina final del grafo; los 'permitidos' detectan un filtro que bloquea de mas.",
+  "k": 5,
+  "casos": [
+    {
+      "id": "R01", "tipo": "recuperacion",
+      "consulta": "¿Cómo progreso la carga cuando completo todas las repeticiones del rango?",
+      "filtros": {},
+      "esperados": ["progresion#como-progresar"]
+    },
+    {
+      "id": "R02", "tipo": "recuperacion",
+      "consulta": "¿Cuántos días por semana debería entrenar un principiante?",
+      "filtros": {},
+      "esperados": ["progresion#por-nivel"]
+    },
+    {
+      "id": "R03", "tipo": "recuperacion",
+      "consulta": "Tengo molestias en el hombro al levantar el brazo por encima de la cabeza",
+      "filtros": {},
+      "esperados": ["consideraciones_por_zona_lesion#hombro"]
+    },
+    {
+      "id": "R04", "tipo": "recuperacion",
+      "consulta": "Me molesta la rodilla al hacer sentadillas profundas y zancadas",
+      "filtros": {},
+      "esperados": ["consideraciones_por_zona_lesion#rodilla"]
+    },
+    {
+      "id": "R05", "tipo": "recuperacion",
+      "consulta": "Tengo dolor en la zona lumbar, ¿cómo adapto el entrenamiento de espalda?",
+      "filtros": {},
+      "esperados": ["consideraciones_por_zona_lesion#zona-lumbar"]
+    },
+    {
+      "id": "R06", "tipo": "recuperacion",
+      "consulta": "¿Cómo debo respirar durante la fase de mayor esfuerzo al levantar pesas?",
+      "filtros": {},
+      "esperados": ["tecnica_basica#principios-generales"]
+    },
+    {
+      "id": "R07", "tipo": "recuperacion",
+      "consulta": "Técnica de la bisagra de cadera en el peso muerto con la barra pegada al cuerpo",
+      "filtros": {},
+      "esperados": ["tecnica_basica#patrones-frecuentes"]
+    },
+    {
+      "id": "R08", "tipo": "recuperacion",
+      "consulta": "Me duele la muñeca con el agarre en extensión bajo carga",
+      "filtros": {},
+      "esperados": ["consideraciones_por_zona_lesion#muneca-y-codo"]
+    },
+    {
+      "id": "R09", "tipo": "recuperacion",
+      "consulta": "Mi rendimiento cae varias sesiones seguidas y noto fatiga persistente, ¿hago una descarga?",
+      "filtros": {},
+      "esperados": ["progresion#como-progresar"]
+    },
+    {
+      "id": "R10", "tipo": "recuperacion",
+      "consulta": "rutina fuerza nivel intermedio barra",
+      "filtros": {"nivel": "intermedio"},
+      "esperados": ["guia:progresion"],
+      "nota": "Consulta con la forma que usa el programador del grafo; con filtro de nivel las guias deben seguir apareciendo."
+    },
+    {
+      "id": "R11", "tipo": "recuperacion",
+      "consulta": "press militar con barra",
+      "filtros": {},
+      "esperados": ["Standing_Military_Press", "Seated_Barbell_Military_Press", "Barbell_Shoulder_Press"]
+    },
+    {
+      "id": "R12", "tipo": "recuperacion",
+      "consulta": "sentadilla con barra en la espalda",
+      "filtros": {},
+      "esperados": ["Barbell_Squat", "Barbell_Full_Squat"],
+      "nota": "Consulta en español sobre un catálogo en inglés: mide la recuperación translingüe."
+    },
+    {
+      "id": "R13", "tipo": "recuperacion",
+      "consulta": "dumbbell bicep curl",
+      "filtros": {"equipo": "dumbbell"},
+      "esperados": ["Dumbbell_Bicep_Curl", "Dumbbell_Alternate_Bicep_Curl"]
+    },
+    {
+      "id": "S01", "tipo": "seguridad",
+      "zona": "hombro_derecho",
+      "consulta": "Dame una rutina de hombro y pecho para 3 días",
+      "prohibidos": ["Barbell_Shoulder_Press", "Standing_Military_Press", "Dumbbell_Shoulder_Press", "Arnold_Dumbbell_Press", "Side_Lateral_Raise", "Front_Dumbbell_Raise", "Upright_Barbell_Row", "Barbell_Bench_Press_-_Medium_Grip", "Dips_-_Triceps_Version", "Pullups"],
+      "permitidos": ["Dumbbell_Bicep_Curl", "Leg_Press", "Leg_Extensions"]
+    },
+    {
+      "id": "S02", "tipo": "seguridad",
+      "zona": "hombro_izquierdo",
+      "consulta": "Quiero una rutina de torso con barra para 2 días",
+      "prohibidos": ["Seated_Barbell_Military_Press", "Bent_Over_Barbell_Row", "Seated_Cable_Rows", "Barbell_Squat", "Barbell_Deadlift"],
+      "permitidos": ["Barbell_Curl", "Lying_Leg_Curls"]
+    },
+    {
+      "id": "S03", "tipo": "seguridad",
+      "zona": "rodilla_derecha",
+      "consulta": "Dame una rutina de pierna para 3 días",
+      "prohibidos": ["Barbell_Squat", "Barbell_Full_Squat", "Leg_Extensions", "Leg_Press", "Barbell_Lunge", "Dumbbell_Lunges", "Box_Jump_Multiple_Response", "Lying_Leg_Curls"],
+      "permitidos": ["Barbell_Bench_Press_-_Medium_Grip", "Dumbbell_Bicep_Curl", "Standing_Military_Press"]
+    },
+    {
+      "id": "S04", "tipo": "seguridad",
+      "zona": "rodilla_izquierda",
+      "consulta": "Quiero entrenar piernas y glúteos 2 días por semana",
+      "prohibidos": ["Front_Barbell_Squat", "Romanian_Deadlift", "Good_Morning", "Seated_Calf_Raise"],
+      "permitidos": ["Hammer_Curls", "Pullups"]
+    },
+    {
+      "id": "S05", "tipo": "seguridad",
+      "zona": "zona_lumbar",
+      "consulta": "Dame una rutina de espalda y core para 3 días",
+      "prohibidos": ["Barbell_Deadlift", "Romanian_Deadlift", "Stiff-Legged_Barbell_Deadlift", "Good_Morning", "Hyperextensions_Back_Extensions", "Bent_Over_Barbell_Row", "Barbell_Squat", "Sit-Up", "Russian_Twist"],
+      "permitidos": ["Dumbbell_Bicep_Curl", "Side_Lateral_Raise", "Pullups"]
+    }
+  ]
+}

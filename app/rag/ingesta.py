@@ -1,4 +1,7 @@
+import re
+import unicodedata
 import uuid
+from pathlib import Path
 
 from pydantic import BaseModel
 from qdrant_client import AsyncQdrantClient
@@ -52,6 +55,57 @@ def documento_desde_ejercicio(e: Ejercicio) -> Documento:
             "musculo": e.musculo_primario,
         },
     )
+
+
+PREFIJO_FUENTE_GUIA = "guia:"
+_SECCIONES_EXCLUIDAS = {"fuentes"}  # bibliografia: no aporta contenido recuperable
+
+
+def _slug(texto: str) -> str:
+    sin_tildes = unicodedata.normalize("NFKD", texto)
+    sin_tildes = "".join(c for c in sin_tildes if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "-", sin_tildes.lower()).strip("-")
+
+
+def documentos_desde_guia(nombre: str, markdown: str) -> list[Documento]:
+    """Trocea una guia Markdown por secciones `## ...`: un Documento por seccion.
+
+    id = "<nombre>#<slug-seccion>", fuente = "guia:<nombre>", sin metadatos de filtro (las
+    guias aplican a cualquier equipo, nivel o musculo). Se omite la seccion de fuentes.
+    """
+    titulo = nombre
+    docs: list[Documento] = []
+    seccion: str | None = None
+    lineas: list[str] = []
+
+    def _cerrar() -> None:
+        cuerpo = "\n".join(lineas).strip()
+        if seccion and cuerpo and _slug(seccion) not in _SECCIONES_EXCLUIDAS:
+            docs.append(Documento(
+                id=f"{nombre}#{_slug(seccion)}",
+                texto=f"{titulo}. {seccion}.\n{cuerpo}",
+                fuente=f"{PREFIJO_FUENTE_GUIA}{nombre}",
+                metadatos={},
+            ))
+
+    for linea in markdown.splitlines():
+        if linea.startswith("# "):
+            titulo = linea[2:].strip()
+        elif linea.startswith("## "):
+            _cerrar()
+            seccion, lineas = linea[3:].strip(), []
+        elif seccion is not None:
+            lineas.append(linea)
+    _cerrar()
+    return docs
+
+
+def documentos_desde_guias(directorio: Path) -> list[Documento]:
+    """Documentos de todas las guias `*.md` del directorio, en orden de nombre de archivo."""
+    docs: list[Documento] = []
+    for ruta in sorted(Path(directorio).glob("*.md")):
+        docs.extend(documentos_desde_guia(ruta.stem, ruta.read_text(encoding="utf-8")))
+    return docs
 
 
 class ColeccionIncompatible(RuntimeError):
