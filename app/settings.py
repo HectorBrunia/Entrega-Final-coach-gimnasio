@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     max_reintentos_seguridad: int = 2
     embedding_model: str
     bm25_idioma: str = "spanish"
+    catalogo_path: Path = Path("data/catalogo/ejercicios.json")
 
 
 @lru_cache

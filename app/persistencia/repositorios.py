@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,6 +23,13 @@ async def _asegurar_usuario(s: AsyncSession, usuario_id: UUID) -> None:
 class RepositorioDominio:
     def __init__(self, sesion_factory: async_sessionmaker):
         self._sesion_factory = sesion_factory
+
+    async def crear_usuario(self) -> UUID:
+        async with self._sesion_factory() as s, s.begin():
+            res = await s.execute(
+                pg_insert(UsuarioTabla).values(id=uuid4()).returning(UsuarioTabla.id)
+            )
+            return res.scalar_one()
 
     async def guardar_perfil(self, perfil: Perfil) -> None:
         valores = dict(

@@ -1,0 +1,253 @@
+from datetime import date
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from langgraph.types import Command, Interrupt
+
+from app.domain.modelos import Ejercicio, EntrenoRegistro, Nivel, Perfil, Rutina
+from app.llm import LLMNoDisponible
+from app.main import crear_app
+
+UID = "00000000-0000-0000-0000-000000000001"
+
+
+def _catalogo() -> dict[str, Ejercicio]:
+    return {"sentadilla": Ejercicio(
+        id="sentadilla", nombre="Sentadilla", musculo_primario="cuadriceps",
+        musculos_secundarios=[], equipo="barra", nivel=Nivel.principiante, instrucciones=["x"])}
+
+
+class RepoFalso:
+    def __init__(self):
+        self.entrenos: list[EntrenoRegistro] = []
+        self.perfiles: dict[UUID, Perfil] = {}
+        self.rutinas: dict[UUID, Rutina] = {}
+        self.llamadas = 0
+
+    async def crear_usuario(self) -> UUID:
+        self.llamadas += 1
+        return UUID(UID)
+
+    async def obtener_perfil(self, usuario_id):
+        self.llamadas += 1
+        return self.perfiles.get(usuario_id)
+
+    async def rutina_actual(self, usuario_id):
+        self.llamadas += 1
+        return self.rutinas.get(usuario_id)
+
+    async def registrar_entreno(self, entreno):
+        self.llamadas += 1
+        self.entrenos.append(entreno)
+
+
+class GrafoFalso:
+    def __init__(self, salida=None, error=None, pausado=True):
+        self.salida = salida if salida is not None else {"respuesta": "Hola"}
+        self.error = error
+        self.pausado = pausado
+        self.invocaciones: list[tuple] = []
+
+    async def ainvoke(self, entrada, config):
+        self.invocaciones.append((entrada, config))
+        if self.error:
+            raise self.error
+        return self.salida
+
+    async def aget_state(self, config):
+        return SimpleNamespace(next=("hitl",) if self.pausado else ())
+
+
+def _cliente(app):
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+def _entreno(ejercicio_id="sentadilla"):
+    return {"fecha": "2026-10-01", "ejercicio_id": ejercicio_id, "series": 3,
+            "repeticiones": 8, "peso_kg": 20, "rpe": 7, "notas": None}
+
+
+@pytest.mark.asyncio
+async def test_registro_entreno_con_ejercicio_inexistente_devuelve_422():
+    repo = RepoFalso()
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/usuarios/00000000-0000-0000-0000-000000000001/entrenos",
+                         json={"fecha": "2026-10-01", "ejercicio_id": "no_existe", "series": 3,
+                               "repeticiones": 8, "peso_kg": 20, "rpe": 7, "notas": None})
+    assert r.status_code == 422
+    assert "no_existe" in r.text
+    assert repo.llamadas == 0  # se valida contra el catalogo antes de tocar la BD
+
+
+@pytest.mark.asyncio
+async def test_registro_entreno_valido_201():
+    repo = RepoFalso()
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post(f"/usuarios/{UID}/entrenos", json=_entreno())
+    assert r.status_code == 201
+    assert repo.entrenos[0].usuario_id == UUID(UID)
+    assert repo.entrenos[0].fecha == date(2026, 10, 1)
+
+
+@pytest.mark.asyncio
+async def test_entrenos_sin_catalogo_devuelve_503():
+    repo = RepoFalso()
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=None)
+    async with _cliente(app) as c:
+        r = await c.post(f"/usuarios/{UID}/entrenos", json=_entreno())
+    assert r.status_code == 503
+    assert "atálogo" in r.json()["detail"]
+    assert repo.llamadas == 0
+
+
+@pytest.mark.asyncio
+async def test_crear_usuario_devuelve_201_con_id():
+    app = crear_app(grafo=GrafoFalso(), repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/usuarios", json={})
+    assert r.status_code == 201
+    assert r.json() == {"id": UID}
+
+
+@pytest.mark.asyncio
+async def test_chat_camino_feliz():
+    grafo = GrafoFalso({"respuesta": "Plan listo"})
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "Armame una rutina"})
+    assert r.status_code == 200
+    assert r.json() == {"respuesta": "Plan listo", "requiere_humano": False, "thread_id": UID}
+    entrada, config = grafo.invocaciones[0]
+    assert config["configurable"]["thread_id"] == UID
+    assert entrada["mensaje"] == "Armame una rutina"
+
+
+@pytest.mark.asyncio
+async def test_chat_con_interrupcion_marca_requiere_humano():
+    salida = {"__interrupt__": [Interrupt(value={"motivo": "dolor_agudo", "ejercicio": "press_banca",
+                                                  "mensaje": "me duele"})]}
+    app = crear_app(grafo=GrafoFalso(salida), repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "me duele"})
+    assert r.status_code == 200
+    cuerpo = r.json()
+    assert cuerpo["requiere_humano"] is True
+    assert cuerpo["respuesta"]
+    assert cuerpo["thread_id"] == UID
+
+
+@pytest.mark.asyncio
+async def test_chat_con_llm_no_disponible_devuelve_503():
+    app = crear_app(grafo=GrafoFalso(error=LLMNoDisponible("429 secreto interno")),
+                    repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "hola"})
+    assert r.status_code == 503
+    assert "secreto" not in r.text
+    assert "Traceback" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_chat_sin_grafo_devuelve_503():
+    app = crear_app(grafo=None, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "hola"})
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_perfil_de_usuario_desconocido_devuelve_404():
+    app = crear_app(grafo=GrafoFalso(), repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{uuid4()}/perfil")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_perfil_existente_y_rutina_actual():
+    repo = RepoFalso()
+    uid = UUID(UID)
+    repo.perfiles[uid] = Perfil(usuario_id=uid, objetivo="masa", dias_disponibles=4,
+                                equipo=["mancuernas"], nivel=Nivel.principiante)
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        p = await c.get(f"/usuarios/{UID}/perfil")
+        rut = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert p.status_code == 200 and p.json()["dias_disponibles"] == 4
+    assert rut.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_existente():
+    repo = RepoFalso()
+    uid = UUID(UID)
+    repo.rutinas[uid] = Rutina(usuario_id=uid, version=2, dias=[])
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 200 and r.json()["version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_reanudar_invoca_el_grafo_con_command_resume():
+    grafo = GrafoFalso({"respuesta": "Consulta a un profesional"})
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post(f"/hitl/{UID}/reanudar", json={"revision": "revisado"})
+    assert r.status_code == 200
+    assert r.json() == {"respuesta": "Consulta a un profesional", "requiere_humano": False,
+                        "thread_id": UID}
+    entrada, config = grafo.invocaciones[0]
+    assert isinstance(entrada, Command) and entrada.resume == "revisado"
+    assert config["configurable"]["thread_id"] == UID
+
+
+@pytest.mark.asyncio
+async def test_reanudar_sin_pausa_devuelve_409():
+    grafo = GrafoFalso(pausado=False)
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post(f"/hitl/{UID}/reanudar", json={"revision": "ok"})
+    assert r.status_code == 409
+    assert grafo.invocaciones == []
+
+
+async def _ok():
+    return None
+
+
+async def _falla():
+    raise RuntimeError("password=hunter2 en postgres://interno")
+
+
+@pytest.mark.asyncio
+async def test_health_todo_ok():
+    app = crear_app(grafo=GrafoFalso(), repo=RepoFalso(), catalogo=_catalogo(),
+                    comprobaciones={"postgres": _ok, "redis": _ok, "qdrant": _ok})
+    async with _cliente(app) as c:
+        r = await c.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok",
+                        "servicios": {"postgres": "ok", "redis": "ok", "qdrant": "ok"}}
+
+
+@pytest.mark.asyncio
+async def test_health_con_un_servicio_caido_devuelve_503_sin_detalles():
+    app = crear_app(grafo=GrafoFalso(), repo=RepoFalso(), catalogo=_catalogo(),
+                    comprobaciones={"postgres": _ok, "redis": _falla, "qdrant": _ok})
+    async with _cliente(app) as c:
+        r = await c.get("/health")
+    assert r.status_code == 503
+    cuerpo = r.json()
+    assert cuerpo["status"] == "degradado"
+    assert cuerpo["servicios"] == {"postgres": "ok", "redis": "error", "qdrant": "ok"}
+    assert "hunter2" not in r.text
+
+
+def test_importar_app_no_requiere_variables_de_entorno():
+    import app.main as m
+    assert m.app.title
