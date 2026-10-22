@@ -54,7 +54,7 @@ class PerfilSalida(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={"examples": [
         {"usuario_id": _UID, "objetivo": "masa muscular", "dias_disponibles": 4,
-         "equipo": ["mancuernas", "barra"], "nivel": "principiante"}
+         "equipo": ["dumbbell", "barbell"], "nivel": "principiante"}
     ]})
 
 

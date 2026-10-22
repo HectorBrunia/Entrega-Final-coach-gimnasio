@@ -3,7 +3,9 @@ from enum import Enum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.domain.equipo import normalizar_equipo
 
 
 class Nivel(str, Enum):
@@ -18,6 +20,12 @@ class Perfil(BaseModel):
     dias_disponibles: int = Field(ge=1, le=7)
     equipo: list[str]
     nivel: Nivel
+
+    @field_validator("equipo")
+    @classmethod
+    def _equipo_del_catalogo(cls, valor: list[str]) -> list[str]:
+        # vocabulario canonico = el del catalogo; sinonimos en español mapeados, desconocidos fuera
+        return normalizar_equipo(valor)
 
 
 class Lesion(BaseModel):
