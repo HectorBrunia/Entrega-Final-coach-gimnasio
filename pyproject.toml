@@ -10,6 +10,8 @@ dependencies = [
     "pydantic-settings==2.15.0",
     "langgraph==1.2.16",
     "langgraph-checkpoint-redis==0.5.2",
+    "langchain-core==1.6.3",
+    "langchain-google-genai==4.4.0",
     "sqlalchemy[asyncio]==2.1.1",
     "asyncpg==0.32.0",
     "alembic==1.20.1",
@@ -28,5 +30,5 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "integracion: pruebas de integracion que requieren servicios externos (Postgres, Qdrant)",
+    "integracion: pruebas de integracion que requieren servicios externos (Postgres, Qdrant, Redis)",
 ]
