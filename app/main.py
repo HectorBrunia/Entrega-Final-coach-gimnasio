@@ -70,10 +70,9 @@ def _crear_motor(url: str):
 
 @asynccontextmanager
 async def _abrir_checkpointer(redis_url: str):
-    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+    from app.agentes.checkpointer import abrir_checkpointer_redis
 
-    async with AsyncRedisSaver.from_conn_string(redis_url) as saver:
-        await saver.asetup()
+    async with abrir_checkpointer_redis(redis_url) as saver:
         yield saver
 
 

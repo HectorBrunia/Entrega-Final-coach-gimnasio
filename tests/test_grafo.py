@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 from pydantic import Field
 
+from app.agentes.checkpointer import abrir_checkpointer_redis, serializador_estado
 from app.agentes.estado import AnalisisMensaje, DecisionSupervisor, PerfilParcial, PlanPropuesto
 from app.agentes.grafo import LIMITE_PASOS, config_hilo, construir_grafo, ruta_seguridad
 from app.agentes.nodos import AVISO_MEDICO, detectar_dolor_agudo
@@ -198,8 +199,13 @@ def repo(usuario) -> RepoFalso:
     return r
 
 
+def _saver() -> InMemorySaver:
+    # mismo serializador que el checkpointer de Redis: el estado se serializa de verdad
+    return InMemorySaver(serde=serializador_estado())
+
+
 async def _grafo(settings, repo, llm, checkpointer=None):
-    return await construir_grafo(settings, repo, checkpointer or InMemorySaver(),
+    return await construir_grafo(settings, repo, checkpointer or _saver(),
                                  catalogo=CATALOGO, llm=llm, buscador=_buscador_falso)
 
 
@@ -436,7 +442,7 @@ async def test_sin_perfil_no_programa(settings, usuario):
 
 
 async def test_mismo_thread_id_continua_el_estado_persistido(settings, repo, usuario):
-    saver = InMemorySaver()
+    saver = _saver()
     llm = LLMFalso(
         estructuradas={"AnalisisMensaje": [AnalisisMensaje()],
                        "DecisionSupervisor": [DecisionSupervisor(destino="sintesis")]},
@@ -454,6 +460,35 @@ async def test_mismo_thread_id_continua_el_estado_persistido(settings, repo, usu
     otro = uuid4()
     aislado = await grafo2.ainvoke({"usuario_id": otro, "mensaje": "nuevo"}, config_hilo(otro))
     assert len(aislado["mensajes"]) == 2
+
+
+async def test_dos_turnos_con_checkpointer_serializador_conservan_los_tipos(settings, repo, usuario):
+    # turno 1 genera la rutina; turno 2 pausa por dolor; la reanudacion lee del checkpoint
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [_plan("press_banca", "sentadilla")],
+    })
+    saver = _saver()
+    cfg = config_hilo(usuario)
+    grafo = await _grafo(settings, repo, llm, saver)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "Armame una rutina"}, cfg)
+
+    valores = (await grafo.aget_state(cfg)).values
+    assert isinstance(valores["usuario_id"], UUID)
+    assert isinstance(valores["perfil"], Perfil)
+    assert isinstance(valores["rutina"], Rutina)
+    assert _ids_rutina(valores["rutina"]) == {"press_banca", "sentadilla"}
+
+    # "reinicio": grafo nuevo sobre el mismo checkpointer
+    grafo = await _grafo(settings, repo, llm, saver)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"}, cfg)
+    assert "__interrupt__" in salida
+    final = await grafo.ainvoke(Command(resume="revisado"), cfg)
+    assert isinstance(final["usuario_id"], UUID)
+    assert isinstance(final["rutina"], Rutina)
+    assert _ids_rutina(final["rutina"]) == {"sentadilla"}
+    assert "profesional" in final["respuesta"]
 
 
 async def test_nodo_seguridad_falla_cerrado_ante_zona_sin_regla(repo, usuario):
@@ -518,14 +553,12 @@ def _sin_credenciales(url: str) -> str:
 
 @pytest.mark.integracion
 async def test_checkpointer_redis_persiste_el_hilo(settings, repo, usuario):
-    from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-
     url = _url_redis()
     if not url:
         pytest.skip("REDIS_URL no configurada")
     try:
-        async with AsyncRedisSaver.from_conn_string(url) as saver:
-            await saver.asetup()
+        async with abrir_checkpointer_redis(url):
+            pass
     except Exception:
         pytest.skip(f"Redis no disponible en {_sin_credenciales(url)}")
 
@@ -534,12 +567,43 @@ async def test_checkpointer_redis_persiste_el_hilo(settings, repo, usuario):
                        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
                        "PlanPropuesto": [_plan("sentadilla")]},
     )
-    async with AsyncRedisSaver.from_conn_string(url) as saver:
+    async with abrir_checkpointer_redis(url) as saver:
         grafo = await _grafo(settings, repo, llm, saver)
         await grafo.ainvoke({"usuario_id": usuario, "mensaje": "rutina"}, config_hilo(usuario))
     # checkpointer reiniciado: nueva conexion, mismo thread_id
-    async with AsyncRedisSaver.from_conn_string(url) as saver:
+    async with abrir_checkpointer_redis(url) as saver:
         grafo = await _grafo(settings, repo, llm, saver)
         estado = await grafo.aget_state(config_hilo(usuario))
         assert estado.values["mensajes"][0].content == "rutina"
+        assert isinstance(estado.values["usuario_id"], UUID)
+        assert isinstance(estado.values["perfil"], Perfil)
+        assert isinstance(estado.values["rutina"], Rutina)
         assert _ids_rutina(estado.values["rutina"]) == {"sentadilla"}
+
+
+@pytest.mark.integracion
+async def test_checkpointer_redis_reanuda_la_pausa_en_otra_conexion(settings, repo, usuario):
+    # la pausa HITL se reanuda con el estado leido de Redis (tipos intactos)
+    url = _url_redis()
+    if not url:
+        pytest.skip("REDIS_URL no configurada")
+    try:
+        async with abrir_checkpointer_redis(url):
+            pass
+    except Exception:
+        pytest.skip(f"Redis no disponible en {_sin_credenciales(url)}")
+
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    async with abrir_checkpointer_redis(url) as saver:
+        grafo = await _grafo(settings, repo, llm, saver)
+        salida = await grafo.ainvoke(
+            {"usuario_id": usuario, "mensaje": "pinchazo con press_banca"}, config_hilo(usuario))
+        assert "__interrupt__" in salida
+    async with abrir_checkpointer_redis(url) as saver:
+        grafo = await _grafo(settings, repo, llm, saver)
+        final = await grafo.ainvoke(Command(resume="revisado"), config_hilo(usuario))
+    assert isinstance(final["usuario_id"], UUID)
+    assert isinstance(final["rutina"], Rutina)
+    assert _ids_rutina(final["rutina"]) == {"sentadilla"}
