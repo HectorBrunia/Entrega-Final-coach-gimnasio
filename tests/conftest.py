@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -6,15 +7,11 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from tests.guarda_bd import resolver_url_pruebas, url_sin_credenciales
+
 RAIZ = Path(__file__).resolve().parent.parent
-
-
-def _url_sin_credenciales(url: str) -> str:
-    u = make_url(url)
-    return f"{u.drivername}://{u.host}:{u.port}/{u.database}"
 
 
 # --- Persistencia (Postgres) -------------------------------------------------
@@ -23,12 +20,10 @@ def _url_sin_credenciales(url: str) -> str:
 async def sesion_factory():
     from app.persistencia.repositorios import crear_motor
     from app.persistencia.tablas import Base
-    from app.settings import Settings
 
-    try:
-        url = Settings().database_url
-    except Exception:
-        pytest.skip("Postgres no disponible: DATABASE_URL no configurada")
+    url, motivo = resolver_url_pruebas(os.environ)
+    if url is None:
+        pytest.skip(motivo)
 
     motor = crear_motor(url)
     try:
@@ -36,12 +31,13 @@ async def sesion_factory():
             await conn.execute(text("SELECT 1"))
     except Exception:
         await motor.dispose()
-        pytest.skip(f"Postgres no disponible en {_url_sin_credenciales(url)}")
+        pytest.skip(f"Postgres no disponible en {url_sin_credenciales(url)}")
 
     resultado = await asyncio.to_thread(
         subprocess.run,
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=RAIZ, capture_output=True, text=True,
+        env={**os.environ, "DATABASE_URL": url},
     )
     if resultado.returncode != 0:
         await motor.dispose()
