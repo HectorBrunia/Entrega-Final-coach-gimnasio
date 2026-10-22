@@ -1,0 +1,29 @@
+[
+  {
+    "id": "Barbell_Squat",
+    "name": "Barbell Squat",
+    "primaryMuscles": ["quadriceps"],
+    "secondaryMuscles": ["glutes", "hamstrings"],
+    "equipment": "barbell",
+    "level": "intermediate",
+    "instructions": ["Colocar la barra sobre la espalda.", "Bajar hasta paralelo y subir."]
+  },
+  {
+    "id": "Push_Up",
+    "name": "Push Up",
+    "primaryMuscles": ["chest"],
+    "secondaryMuscles": ["triceps", "shoulders"],
+    "equipment": null,
+    "level": "beginner",
+    "instructions": ["Apoyar manos y pies en el suelo.", "Bajar el pecho y empujar."]
+  },
+  {
+    "id": "Muscle_Up",
+    "name": "Muscle Up",
+    "primaryMuscles": ["lats"],
+    "secondaryMuscles": ["chest", "triceps"],
+    "equipment": "body only",
+    "level": "EXPERT",
+    "instructions": ["Colgarse de la barra.", "Tirar y pasar sobre la barra."]
+  }
+]
