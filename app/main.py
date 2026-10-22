@@ -1,5 +1,6 @@
 """Fabrica de la aplicacion FastAPI. Nada se construye al importar: todo va en el lifespan."""
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
@@ -13,8 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.rutas import (
-    TIMEOUT_SALUD_SEG, EjercicioDesconocido, NoEncontrado, ServicioNoDisponible,
-    SinPausaPendiente, router,
+    TIMEOUT_SALUD_SEG, ConversacionPausada, EjercicioDesconocido, NoEncontrado,
+    RutinaEnRevision, RutinaNoSegura, ServicioNoDisponible, SinPausaPendiente, router,
 )
 from app.domain.modelos import Ejercicio
 from app.llm import LLMNoDisponible
@@ -50,6 +51,26 @@ def _registrar_manejadores(app: FastAPI) -> None:
     @app.exception_handler(SinPausaPendiente)
     async def _sin_pausa(_: Request, __: SinPausaPendiente):
         return _json(409, "No hay una conversación pausada para reanudar")
+
+    @app.exception_handler(ConversacionPausada)
+    async def _pausada(_: Request, exc: ConversacionPausada):
+        return _json(
+            409,
+            "La conversación está pausada para revisión humana. Reanúdala con "
+            f"POST /hitl/{exc.thread_id}/reanudar antes de enviar mensajes nuevos.",
+        )
+
+    @app.exception_handler(RutinaEnRevision)
+    async def _en_revision(_: Request, __: RutinaEnRevision):
+        return _json(409, "Rutina en revisión: la conversación espera una revisión humana")
+
+    @app.exception_handler(RutinaNoSegura)
+    async def _no_segura(_: Request, __: RutinaNoSegura):
+        return _json(
+            409,
+            "La rutina guardada ya no es segura con tus lesiones o molestias actuales. "
+            "Pide una rutina nueva por /chat o consulta a un profesional.",
+        )
 
     @app.exception_handler(Exception)
     async def _inesperado(_: Request, exc: Exception):
@@ -175,6 +196,12 @@ def crear_app(
                     logger.error("No se pudo construir el repositorio: %s", type(exc).__name__)
             if app.state.catalogo is None:
                 app.state.catalogo = _cargar_catalogo(cfg)
+            if app.state.catalogo is not None:
+                # indice de bloqueos por zona: una vez, fuera del event loop (lo reutilizan el
+                # grafo y GET /rutinas/actual)
+                from app.safety.reglas import indice_bloqueo
+
+                await asyncio.to_thread(indice_bloqueo, app.state.catalogo)
             if app.state.comprobaciones is None and motor is not None:
                 app.state.comprobaciones = _comprobaciones(cfg, motor)
             if (

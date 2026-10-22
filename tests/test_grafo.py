@@ -143,7 +143,7 @@ class RepoFalso:
 
 def _ej(id_: str, musculo: str) -> Ejercicio:
     return Ejercicio(id=id_, nombre=id_.replace("_", " "), musculo_primario=musculo,
-                     musculos_secundarios=[], equipo="barra", nivel=Nivel.principiante,
+                     musculos_secundarios=[], equipo="barbell", nivel=Nivel.principiante,
                      instrucciones=[])
 
 
@@ -607,3 +607,225 @@ async def test_checkpointer_redis_reanuda_la_pausa_en_otra_conexion(settings, re
     assert isinstance(final["usuario_id"], UUID)
     assert isinstance(final["rutina"], Rutina)
     assert _ids_rutina(final["rutina"]) == {"sentadilla"}
+
+
+
+# --- I1: /chat sobre un hilo en pausa (grafo compilado + LLM falso + checkpointer) -------
+
+def _cliente_api(grafo, repo):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import crear_app
+
+    app = crear_app(grafo=grafo, repo=repo, catalogo=CATALOGO)
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+async def _pausa_chat_409_y_reanudar(grafo, repo, usuario, llm):
+    uid = str(usuario)
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.post("/chat", json={"usuario_id": uid,
+                                        "mensaje": "pinchazo con press_banca"})
+        assert r.status_code == 200 and r.json()["requiere_humano"] is True
+
+        r = await c.post("/chat", json={"usuario_id": uid, "mensaje": "dame una rutina"})
+        assert r.status_code == 409
+        assert f"/hitl/{uid}/reanudar" in r.json()["detail"]
+        # la pausa sigue pendiente: no se llamo ni al supervisor ni al programador
+        assert "DecisionSupervisor" not in llm.llamadas
+        assert "PlanPropuesto" not in llm.llamadas
+        assert (await grafo.aget_state(config_hilo(usuario))).interrupts
+
+        r = await c.get(f"/usuarios/{uid}/rutinas/actual")
+        assert r.status_code == 409 and "revisión" in r.json()["detail"]
+
+        r = await c.post(f"/hitl/{uid}/reanudar", json={"revision": "revisado"})
+        assert r.status_code == 200
+        assert "profesional" in r.json()["respuesta"]
+        assert r.json()["requiere_humano"] is False
+
+        r = await c.get(f"/usuarios/{uid}/rutinas/actual")
+        assert r.status_code == 200
+        assert {p["ejercicio_id"] for d in r.json()["dias"] for p in d["ejercicios"]} == {"sentadilla"}
+
+
+async def test_chat_en_pausa_devuelve_409_y_la_pausa_sigue_reanudable(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    await _pausa_chat_409_y_reanudar(grafo, repo, usuario, llm)
+
+
+# --- I2: lesion nueva en un turno que escala a HITL --------------------------------------
+
+async def test_lesion_nueva_y_dolor_agudo_en_el_mismo_mensaje_depura_antes_de_la_pausa(
+    settings, repo, usuario
+):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "sentadilla", "press_banca")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+        Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])]})
+    grafo = await _grafo(settings, repo, llm)
+    cfg = config_hilo(usuario)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje":
+                                  "me lesione el hombro derecho y tengo dolor agudo en el press banca"},
+                                 cfg)
+    assert "__interrupt__" in salida
+    # sin reanudar: la rutina guardada ya no tiene lo que bloquea el hombro (ni el del dolor)
+    actual = await repo.rutina_actual(usuario)
+    assert _ids_rutina(actual) == {"sentadilla"}
+    assert actual.version == 2
+
+    final = await grafo.ainvoke(Command(resume="revisado"), cfg)
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
+    assert len(repo.rutinas[usuario]) == 2  # idempotente: la reanudacion no crea otra version
+    assert "press militar" not in final["respuesta"].lower()
+
+
+async def test_zona_conocida_y_zona_sin_regla_depura_la_conocida_antes_de_la_pausa(
+    settings, repo, usuario
+):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+        Lesion(zona="hombro_derecho", severidad="moderada", activa=True),
+        Lesion(zona="tobillo", severidad="leve", activa=True)])]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "hombro y tobillo lesionados"},
+                                 config_hilo(usuario))
+    assert "__interrupt__" in salida
+    assert salida["__interrupt__"][0].value["motivo"] == "zona_sin_regla"
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
+
+
+async def test_zona_sin_regla_get_rutina_409_mientras_la_pausa_esta_pendiente(
+    settings, repo, usuario
+):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1, dias=_dias("sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+        Lesion(zona="tobillo", severidad="leve", activa=True)])]})
+    grafo = await _grafo(settings, repo, llm)
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.post("/chat", json={"usuario_id": str(usuario), "mensaje": "me torci el tobillo"})
+        assert r.json()["requiere_humano"] is True
+        assert "dolor agudo" not in r.json()["respuesta"]
+        r = await c.get(f"/usuarios/{usuario}/rutinas/actual")
+        assert r.status_code == 409
+
+
+# --- M-c: nunca se guarda ni se muestra una rutina vacia ----------------------------------
+
+async def test_rutina_totalmente_bloqueada_no_se_guarda_vacia(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "elevaciones_frontales")))
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+            Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])],
+        "PlanPropuesto": [_plan("press_militar")],  # el programador insiste en algo bloqueado
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro"},
+                                 config_hilo(usuario))
+    assert all(_ids_rutina(r) for r in repo.rutinas[usuario])  # ninguna version vacia
+    assert len(repo.rutinas[usuario]) == 1
+    assert "plan seguro" in salida["respuesta"] and "profesional" in salida["respuesta"]
+    assert "Tu rutina" not in salida["respuesta"]
+    assert salida["respuesta"].endswith(AVISO_MEDICO)
+    # la version vigente (insegura) no se sirve por la API
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.get(f"/usuarios/{usuario}/rutinas/actual")
+    assert r.status_code == 409
+    assert "press_militar" not in r.text
+
+
+async def test_sintesis_nunca_muestra_una_rutina_vacia(repo, usuario):
+    from app.agentes.nodos import MSG_SIN_PLAN_SEGURO, Nodos
+
+    nodos = Nodos(repo, CATALOGO, LLMFalso(), _buscador_falso)
+    salida = await nodos.sintesis({
+        "usuario_id": usuario, "mensaje": "rutina", "plan_validado": True,
+        "rutina": Rutina(usuario_id=usuario, version=3, dias=[]),
+    })
+    assert salida["respuesta"] == f"{MSG_SIN_PLAN_SEGURO}\n\n{AVISO_MEDICO}"
+    assert salida["rutina"] is None
+
+
+async def test_plan_sin_ejercicios_no_se_guarda(settings, repo, usuario):
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [PlanPropuesto(dias=[DiaRutina(nombre="A", ejercicios=[])])],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "rutina"}, config_hilo(usuario))
+    assert await repo.rutina_actual(usuario) is None
+    assert "Tu rutina" not in salida["respuesta"]
+
+
+# --- M-b: el mensaje de HITL depende del motivo -------------------------------------------
+
+async def test_escalado_del_supervisor_sin_dolor_no_dice_dolor_agudo(settings, repo, usuario):
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="hitl")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    cfg = config_hilo(usuario)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me mareo al entrenar"}, cfg)
+    assert salida["__interrupt__"][0].value["motivo"] == "escalado_supervisor"
+    final = await grafo.ainvoke(Command(resume="ok"), cfg)
+    assert "dolor agudo" not in final["respuesta"].lower()
+    assert "profesional" in final["respuesta"]
+    assert final["respuesta"].endswith(AVISO_MEDICO)
+
+
+# --- I8: volumen semanal en la respuesta del programador ---------------------------------
+
+async def test_rutina_nueva_incluye_volumen_semanal_por_musculo(settings, repo, usuario):
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [PlanPropuesto(dias=_dias("sentadilla", "press_banca") + [
+            DiaRutina(nombre="Dia B", ejercicios=[EjercicioPlanificado(
+                ejercicio_id="sentadilla", series=4, repeticiones="5", descanso_seg=120,
+                fuentes=[])])])],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "rutina"}, config_hilo(usuario))
+    assert salida["volumen"] == {"quadriceps": 7, "chest": 3}
+    assert "Volumen semanal (series por músculo principal): quadriceps 7, chest 3." in salida["respuesta"]
+    assert llm.llamadas.count("texto") == 0  # determinista, sin llamada extra al LLM
+
+
+async def test_revalidar_rutina_existente_no_muestra_volumen_obsoleto(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+        Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro"},
+                                 config_hilo(usuario))
+    assert "Retiré 1 ejercicio" in salida["respuesta"]
+    assert "Volumen semanal" not in salida["respuesta"]
+
+
+# --- I1 con Redis real -------------------------------------------------------------------
+
+@pytest.mark.integracion
+async def test_chat_en_pausa_con_redis_devuelve_409_y_reanuda(settings, repo, usuario):
+    url = _url_redis()
+    if not url:
+        pytest.skip("REDIS_URL no configurada")
+    try:
+        async with abrir_checkpointer_redis(url):
+            pass
+    except Exception:
+        pytest.skip(f"Redis no disponible en {_sin_credenciales(url)}")
+
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    async with abrir_checkpointer_redis(url) as saver:
+        grafo = await _grafo(settings, repo, llm, saver)
+        await _pausa_chat_409_y_reanudar(grafo, repo, usuario, llm)

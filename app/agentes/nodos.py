@@ -21,12 +21,26 @@ from app.agentes.estado import (
     EstadoCoach,
     PlanPropuesto,
 )
+from app.domain.equipo import EQUIPO_SIEMPRE_DISPONIBLE
 from app.domain.modelos import DiaRutina, Ejercicio, Lesion, Perfil, Rutina
-from app.herramientas.funciones import consultar_historial, validar_plan
+from app.herramientas.esquemas import EntradaVolumen
+from app.herramientas.funciones import (
+    EjercicioDesconocido,
+    consultar_historial,
+    validar_plan,
+    volumen_semanal,
+)
 from app.persistencia.repositorios import RepositorioDominio
 from app.rag.ingesta import Documento
 from app.rag.recuperador import FiltrosBusqueda
-from app.safety.reglas import REGLAS_LESION, ZonaLesionDesconocida, filtrar_por_lesiones
+from app.safety.reglas import (
+    REGLAS_LESION,
+    IndiceBloqueo,
+    ZonaLesionDesconocida,
+    filtrar_por_lesiones,
+    ids_bloqueados,
+    indice_bloqueo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +72,41 @@ MSG_RESPUESTA_INSEGURA = (
     "Prefiero no responder a eso con recomendaciones concretas porque podrían no ser seguras "
     "con tus lesiones o molestias actuales. Si quieres, puedo armarte una rutina validada."
 )
+
+# Plantillas fijas por motivo de la pausa HITL (sin LLM). "otro" cubre escalado_supervisor y
+# cualquier motivo futuro: nunca se afirma dolor agudo si no se detecto.
+MOTIVO_DOLOR = "dolor_agudo"
+MOTIVO_ZONA = "zona_sin_regla"
+
+_PAUSA = {
+    MOTIVO_DOLOR: (
+        "Conversación pausada para revisión humana: reportaste dolor agudo. Detén ese "
+        "ejercicio y consulta a un profesional de la salud."
+    ),
+    MOTIVO_ZONA: (
+        "Conversación pausada para revisión humana: registraste una lesión en una zona que no "
+        "puedo evaluar de forma segura. No entrenes esa zona y consulta a un profesional de la salud."
+    ),
+    "otro": (
+        "Conversación pausada para revisión humana. Mientras tanto, si tienes dudas sobre tu "
+        "estado de salud, consulta a un profesional."
+    ),
+}
+
+_TRAS_REVISION = {
+    MOTIVO_DOLOR: (
+        "Reportaste dolor agudo{sobre}. Detén el ejercicio y consulta a un profesional "
+        "(médico o fisioterapeuta) antes de continuar. No voy a recomendarte más ese ejercicio."
+    ),
+    MOTIVO_ZONA: (
+        "Registraste una lesión en una zona que no puedo evaluar de forma segura. "
+        "Antes de seguir entrenando, consulta a un profesional (médico o fisioterapeuta)."
+    ),
+    "otro": (
+        "Tu consulta fue revisada. Por precaución, antes de seguir entrenando consulta a un "
+        "profesional (médico o fisioterapeuta) sobre lo que describiste."
+    ),
+}
 
 
 def _normalizar(texto: str) -> str:
@@ -95,6 +144,20 @@ def _con_aviso(texto: str) -> str:
     return f"{texto.rstrip()}\n\n{AVISO_MEDICO}"
 
 
+def texto_pausa(motivo: str | None) -> str:
+    """Mensaje al usuario mientras la conversacion espera la revision humana."""
+    return _con_aviso(_PAUSA.get(motivo or "", _PAUSA["otro"]))
+
+
+def texto_tras_revision(motivo: str | None, sobre: str = "") -> str:
+    plantilla = _TRAS_REVISION.get(motivo or "", _TRAS_REVISION["otro"])
+    return _con_aviso(plantilla.format(sobre=sobre))
+
+
+def _tiene_ejercicios(rutina: Rutina | None) -> bool:
+    return rutina is not None and any(d.ejercicios for d in rutina.dias)
+
+
 class Nodos:
     def __init__(
         self,
@@ -102,9 +165,13 @@ class Nodos:
         catalogo: dict[str, Ejercicio],
         llm: BaseChatModel,
         buscador: Buscador,
+        indice: IndiceBloqueo | None = None,
     ):
         self.repo = repo
         self.catalogo = catalogo
+        # zona -> ids bloqueados, precalculado una vez: el filtro en cada turno son busquedas
+        # en conjuntos y no bloquea el event loop
+        self.indice = indice or indice_bloqueo(catalogo)
         self.llm = llm
         self.buscador = buscador
         self._analizar = llm.with_structured_output(AnalisisMensaje)
@@ -146,12 +213,26 @@ class Nodos:
 
     def _prohibidos(self, lesiones: list[Lesion], excluidos: list[str]) -> set[str]:
         """Ids que no pueden recomendarse. Propaga ZonaLesionDesconocida."""
-        res = filtrar_por_lesiones(list(self.catalogo.values()), lesiones)
-        return {i for i, _ in res.bloqueados} | set(excluidos)
+        return set(ids_bloqueados(lesiones, self.indice)) | set(excluidos)
 
     def _nombre(self, ejercicio_id: str) -> str:
         ej = self.catalogo.get(ejercicio_id)
         return ej.nombre if ej else ejercicio_id
+
+    async def _guardar_sin(self, uid: UUID, rutina: Rutina, quitar: set[str]) -> Rutina | None:
+        """Guarda una version de `rutina` sin `quitar` y devuelve la vigente.
+
+        Idempotente: si no hay nada que quitar no guarda. Nunca guarda una rutina vacia: si
+        quedaria sin ejercicios devuelve None y no guarda (la vigente insegura no se sirve:
+        seguridad la rehace y GET /rutinas/actual la rechaza).
+        """
+        if not set(quitar) & set(_ids_rutina(rutina)):
+            return rutina
+        depurada = _quitar_ejercicios(rutina, set(quitar))
+        if not _tiene_ejercicios(depurada):
+            return None
+        await self.repo.guardar_rutina(depurada)
+        return await self.repo.rutina_actual(uid)
 
     @staticmethod
     def _historial(estado: EstadoCoach) -> list[BaseMessage]:
@@ -181,6 +262,20 @@ class Nodos:
         for lesion in analisis.lesiones_nuevas:
             await self.repo.agregar_lesion(uid, lesion)
         lesiones = await self.repo.lesiones_activas(uid)
+        lesion_nueva = any(l.activa for l in analisis.lesiones_nuevas)
+
+        # Lesion nueva: se retira YA de la rutina persistida lo que bloquean sus zonas conocidas,
+        # antes de cualquier pausa HITL (que puede no reanudarse nunca). Las zonas sin regla no
+        # se pueden depurar: se escalan a humano y GET /rutinas/actual responde 409 mientras tanto.
+        retirados: list[str] = []
+        if lesion_nueva and rutina is not None:
+            quitar = ids_bloqueados(lesiones, self.indice, solo_conocidas=True)
+            retirados = [i for i in _ids_rutina(rutina) if i in quitar]
+            depurada = await self._guardar_sin(uid, rutina, set(retirados))
+            if depurada is None:
+                retirados = []  # no se guardo (quedaria vacia): seguridad la rechaza y se rehace
+            else:
+                rutina = depurada
 
         dolor = dolor_por_palabra or analisis.dolor_agudo
         ejercicio = None
@@ -195,9 +290,8 @@ class Nodos:
                 # Se retira ya de la rutina persistida (antes de la pausa HITL), para que no
                 # se siga sirviendo aunque la pausa nunca se reanude. Idempotente: si ya no
                 # esta, no se guarda otra version. Sin ejercicio identificado no se toca.
-                if rutina is not None and ejercicio in _ids_rutina(rutina):
-                    await self.repo.guardar_rutina(_quitar_ejercicios(rutina, {ejercicio}))
-                    rutina = await self.repo.rutina_actual(uid)
+                if rutina is not None:
+                    rutina = await self._guardar_sin(uid, rutina, {ejercicio}) or rutina
 
         return {
             "perfil": perfil,
@@ -208,10 +302,11 @@ class Nodos:
             "rutina_nueva": False,
             "plan_validado": False,
             "fallo_plan": False,
-            "retirados": [],
-            "lesion_nueva": any(l.activa for l in analisis.lesiones_nuevas),
+            "retirados": retirados,
+            "volumen": None,
+            "lesion_nueva": lesion_nueva,
             "requiere_humano": dolor,
-            "motivo_humano": "dolor_agudo" if dolor else None,
+            "motivo_humano": MOTIVO_DOLOR if dolor else None,
             "ejercicio_con_dolor": ejercicio or analisis.ejercicio_con_dolor,
             "ejercicios_excluidos": excluidos,
             "explicacion": "",
@@ -259,7 +354,7 @@ class Nodos:
         try:
             filtrar_por_lesiones([], estado.get("lesiones") or [])
         except ZonaLesionDesconocida:
-            return {"siguiente": "hitl", "requiere_humano": True, "motivo_humano": "zona_sin_regla"}
+            return {"siguiente": "hitl", "requiere_humano": True, "motivo_humano": MOTIVO_ZONA}
         if estado.get("lesion_nueva") and estado.get("rutina") is not None:
             return {"siguiente": "seguridad"}
 
@@ -319,9 +414,11 @@ class Nodos:
 
         excluidos = set(estado.get("ejercicios_excluidos") or []) | set(previos)
         try:
-            permitidos = filtrar_por_lesiones(list(self.catalogo.values()), estado.get("lesiones") or [])
+            permitidos = filtrar_por_lesiones(
+                list(self.catalogo.values()), estado.get("lesiones") or [], self.indice
+            )
         except ZonaLesionDesconocida:
-            return {**base, "requiere_humano": True, "motivo_humano": "zona_sin_regla"}
+            return {**base, "requiere_humano": True, "motivo_humano": MOTIVO_ZONA}
 
         consulta = f"rutina {perfil.objetivo} nivel {perfil.nivel.value} {' '.join(perfil.equipo)}"
         try:
@@ -334,19 +431,31 @@ class Nodos:
         plan = await self._planificar.ainvoke(
             self._prompt_programador(estado, perfil, candidatos, documentos, previos, contexto_extra)
         )
-        if plan is None or not plan.dias:
+        rutina = Rutina(usuario_id=estado["usuario_id"], version=1, dias=plan.dias) if plan else None
+        if not _tiene_ejercicios(rutina):
             return {**base, "rutina": None, "fallo_plan": True}
-        rutina = Rutina(usuario_id=estado["usuario_id"], version=1, dias=plan.dias)
         return {**base, "rutina": rutina, "rutina_nueva": True, "plan_validado": False,
-                "explicacion": plan.explicacion}
+                "explicacion": plan.explicacion, "volumen": self._volumen(rutina)}
+
+    def _volumen(self, rutina: Rutina) -> dict[str, int] | None:
+        """Series semanales por musculo primario (herramienta volumen_semanal, determinista)."""
+        try:
+            entrada = EntradaVolumen(rutina=rutina, catalogo=self.catalogo)
+            return volumen_semanal(entrada).series_por_musculo
+        except EjercicioDesconocido:
+            return None  # id fuera del catalogo: seguridad bloquea el plan y se rehace
 
     @staticmethod
     def _candidatos(
         perfil: Perfil, permitidos: list[Ejercicio], excluidos: set[str], documentos: list[Documento]
     ) -> list[Ejercicio]:
         utiles = [e for e in permitidos if e.id not in excluidos]
-        equipo = {_normalizar(x) for x in perfil.equipo}
-        con_equipo = [e for e in utiles if _normalizar(e.equipo) in equipo] or utiles
+        # Perfil.equipo ya esta en el vocabulario del catalogo (app.domain.equipo); el peso
+        # corporal no necesita equipo. Sin equipo declarado no se filtra.
+        equipo = set(perfil.equipo)
+        if equipo:
+            equipo.add(EQUIPO_SIEMPRE_DISPONIBLE)
+        con_equipo = [e for e in utiles if not equipo or e.equipo in equipo] or utiles
         orden_rag = {d.id: i for i, d in enumerate(documentos)}
         con_equipo.sort(key=lambda e: orden_rag.get(e.id, len(orden_rag)))
         return con_equipo[:MAX_CANDIDATOS]
@@ -389,13 +498,16 @@ class Nodos:
         try:
             bloqueados = await self._bloqueados(rutina, lesiones, excluidos)
         except ZonaLesionDesconocida:
-            return {"requiere_humano": True, "motivo_humano": "zona_sin_regla", "plan_validado": False}
+            return {"requiere_humano": True, "motivo_humano": MOTIVO_ZONA, "plan_validado": False}
 
         if bloqueados and not estado.get("rutina_nueva"):
             # Rutina ya persistida que deja de ser segura (p. ej. lesion nueva): se retiran
             # los ejercicios bloqueados de forma determinista y se guarda la nueva version.
+            # Si no queda ningun ejercicio no se guarda una version vacia: se rehace el plan.
             depurada = _quitar_ejercicios(rutina, set(bloqueados))
-            if not await self._bloqueados(depurada, lesiones, excluidos):
+            if _tiene_ejercicios(depurada) and not await self._bloqueados(
+                depurada, lesiones, excluidos
+            ):
                 await self.repo.guardar_rutina(depurada)
                 actual = await self.repo.rutina_actual(estado["usuario_id"])
                 return {"rutina": actual, "bloqueados": [], "plan_validado": True,
@@ -404,20 +516,22 @@ class Nodos:
         if bloqueados:
             return {"bloqueados": bloqueados, "plan_validado": False}
 
+        if not _tiene_ejercicios(rutina):  # nunca se guarda ni se valida una rutina vacia
+            return {"rutina": None, "bloqueados": [], "plan_validado": False, "fallo_plan": True}
         if estado.get("rutina_nueva"):
             await self.repo.guardar_rutina(rutina)
             rutina = await self.repo.rutina_actual(estado["usuario_id"])
         return {"rutina": rutina, "bloqueados": [], "plan_validado": True, "rutina_nueva": False}
 
     async def _bloqueados(self, rutina: Rutina, lesiones: list[Lesion], excluidos: list[str]) -> list[str]:
-        bloqueados = await validar_plan(rutina, lesiones, self.catalogo)
+        bloqueados = await validar_plan(rutina, lesiones, self.catalogo, self.indice)
         extra = [i for i in _ids_rutina(rutina) if i in excluidos and i not in bloqueados]
         return bloqueados + extra
 
     # --- HITL ---------------------------------------------------------------------
 
     async def hitl(self, estado: EstadoCoach) -> dict:
-        motivo = estado.get("motivo_humano") or "dolor_agudo"
+        motivo = estado.get("motivo_humano") or MOTIVO_DOLOR
         ejercicio = estado.get("ejercicio_con_dolor")
         # Antes de interrupt() no hay efectos: el nodo se re-ejecuta completo al reanudar.
         revision = interrupt({
@@ -429,23 +543,16 @@ class Nodos:
 
         uid = estado["usuario_id"]
         rutina = await self.repo.rutina_actual(uid)
-        excluidos = set(estado.get("ejercicios_excluidos") or [])
-        if rutina is not None and excluidos & set(_ids_rutina(rutina)):
-            await self.repo.guardar_rutina(_quitar_ejercicios(rutina, excluidos))
-            rutina = await self.repo.rutina_actual(uid)
+        if rutina is not None:
+            # defensa en profundidad: ademas de los excluidos por dolor, lo que bloquean las
+            # lesiones activas con regla (idempotente; nunca deja una version vacia)
+            quitar = set(estado.get("ejercicios_excluidos") or []) | ids_bloqueados(
+                estado.get("lesiones") or [], self.indice, solo_conocidas=True
+            )
+            rutina = await self._guardar_sin(uid, rutina, quitar) or rutina
 
-        if motivo == "zona_sin_regla":
-            texto = (
-                "Registraste una lesión en una zona que no puedo evaluar de forma segura. "
-                "Antes de seguir entrenando, consulta a un profesional (médico o fisioterapeuta)."
-            )
-        else:
-            sobre = f" con {self._nombre(ejercicio)}" if ejercicio in self.catalogo else ""
-            texto = (
-                f"Reportaste dolor agudo{sobre}. Detén el ejercicio y consulta a un profesional "
-                "(médico o fisioterapeuta) antes de continuar. No voy a recomendarte más ese ejercicio."
-            )
-        texto = _con_aviso(texto)
+        sobre = f" con {self._nombre(ejercicio)}" if ejercicio in self.catalogo else ""
+        texto = texto_tras_revision(motivo, sobre)
         return {
             "respuesta": texto,
             "rutina": rutina,
@@ -463,7 +570,11 @@ class Nodos:
             texto = MSG_SIN_PLAN_SEGURO
             cambios["rutina"] = None
         elif estado.get("plan_validado") and estado.get("rutina") is not None:
-            texto = self._formatear_rutina(estado)
+            if _tiene_ejercicios(estado["rutina"]):
+                texto = self._formatear_rutina(estado)
+            else:  # nunca se muestra una rutina vacia como "Tu rutina"
+                texto = MSG_SIN_PLAN_SEGURO
+                cambios["rutina"] = None
         elif estado.get("fallo_plan"):
             texto = MSG_FALLO_PLAN
         else:
@@ -490,6 +601,13 @@ class Nodos:
                     f"descanso {p.descanso_seg} s"
                 )
                 fuentes.extend(f for f in p.fuentes if f not in fuentes)
+        volumen = estado.get("volumen")
+        if volumen:
+            resumen = ", ".join(
+                f"{musculo} {series}"
+                for musculo, series in sorted(volumen.items(), key=lambda kv: (-kv[1], kv[0]))
+            )
+            lineas.append(f"\nVolumen semanal (series por músculo principal): {resumen}.")
         explicacion = estado.get("explicacion") or ""
         try:
             prohibidos = self._prohibidos(estado.get("lesiones") or [], estado.get("ejercicios_excluidos") or [])

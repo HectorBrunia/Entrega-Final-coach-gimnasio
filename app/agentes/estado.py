@@ -27,6 +27,7 @@ class EstadoCoach(TypedDict, total=False):
     plan_validado: bool  # seguridad aprobo la rutina en este turno
     fallo_plan: bool  # el LLM no devolvio un plan utilizable
     retirados: list[str]  # ejercicios quitados de la rutina existente al revalidarla
+    volumen: dict[str, int] | None  # series semanales por musculo del plan nuevo (volumen_semanal)
     lesion_nueva: bool
     requiere_humano: bool
     motivo_humano: str | None

@@ -1,5 +1,6 @@
 """Grafo LangGraph del coach: supervisor, especialistas, seguridad, HITL y sintesis."""
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
@@ -18,6 +19,7 @@ from app.llm import crear_llm
 from app.persistencia.repositorios import RepositorioDominio
 from app.rag.ingesta import Documento
 from app.rag.recuperador import FiltrosBusqueda
+from app.safety.reglas import indice_bloqueo
 from app.settings import Settings
 
 # Limite duro de pasos por invocacion (recursion_limit de LangGraph). Un turno normal usa
@@ -66,7 +68,9 @@ async def construir_grafo(
         async def buscador(consulta: str, filtros: FiltrosBusqueda) -> list[Documento]:
             return await buscar_conocimiento(consulta, filtros, settings=settings)
 
-    nodos = Nodos(repo, catalogo, llm, buscador)
+    # indice zona -> ids bloqueados: se calcula una vez y fuera del event loop (CPU)
+    indice = await asyncio.to_thread(indice_bloqueo, catalogo)
+    nodos = Nodos(repo, catalogo, llm, buscador, indice)
     g = StateGraph(EstadoCoach)
     g.add_node("evaluador", nodos.evaluador)
     g.add_node("supervisor", nodos.supervisor)

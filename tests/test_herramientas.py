@@ -12,6 +12,8 @@ from app.domain.modelos import (
     Nivel,
     Rutina,
 )
+from pydantic import ValidationError
+
 from app.herramientas import funciones
 from app.herramientas.esquemas import EntradaVolumen
 from app.herramientas.funciones import (
@@ -88,7 +90,7 @@ async def test_consultar_historial_delega_en_repo():
     assert await consultar_historial(RepoFalso(), uid, 5) == [reg]
 
 
-async def test_buscar_conocimiento_delega_en_rag(monkeypatch):
+async def test_buscar_conocimiento_delega_en_rag(monkeypatch, settings_rag):
     doc = Documento(id="d", texto="t", fuente="f", metadatos={})
     llamado = {}
 
@@ -98,6 +100,52 @@ async def test_buscar_conocimiento_delega_en_rag(monkeypatch):
 
     monkeypatch.setattr(funciones, "buscar", falso)
     filtros = FiltrosBusqueda(musculo="pecho")
-    sentinela = object()
-    assert await buscar_conocimiento("press", filtros, k=3, settings=sentinela) == [doc]
-    assert llamado == {"consulta": "press", "filtros": filtros, "k": 3, "settings": sentinela}
+    assert await buscar_conocimiento("press", filtros, k=3, settings=settings_rag) == [doc]
+    assert llamado == {"consulta": "press", "filtros": filtros, "k": 3, "settings": settings_rag}
+
+
+
+# --- I8: validacion Pydantic en tiempo de ejecucion de todas las herramientas -------------
+
+def test_volumen_semanal_rechaza_entrada_mal_tipada():
+    with pytest.raises(ValidationError):
+        volumen_semanal({"rutina": "no es una rutina", "catalogo": {}})
+
+
+async def test_validar_plan_rechaza_entrada_mal_tipada():
+    with pytest.raises(ValidationError):
+        await validar_plan("no es una rutina", HOMBRO, catalogo={})
+    with pytest.raises(ValidationError):
+        await validar_plan(_plan("x"), [{"zona": "hombro_derecho"}], catalogo={})
+
+
+async def test_validar_plan_valida_la_salida():
+    # la salida tambien se valida: devuelve exactamente list[str]
+    assert await validar_plan(_plan("fantasma"), [], catalogo={}) == ["fantasma"]
+
+
+async def test_consultar_historial_rechaza_entrada_mal_tipada():
+    class RepoFalso:
+        async def historial(self, usuario_id, limite):
+            return []
+
+    with pytest.raises(ValidationError):
+        await consultar_historial(RepoFalso(), "no-es-un-uuid", 5)
+    with pytest.raises(ValidationError):
+        await consultar_historial(RepoFalso(), uuid4(), 0)
+    with pytest.raises(ValidationError):  # objeto sin `historial`
+        await consultar_historial(object(), uuid4(), 5)
+
+
+async def test_consultar_historial_valida_la_salida():
+    class RepoRoto:
+        async def historial(self, usuario_id, limite):
+            return [{"no": "es un entreno"}]
+
+    with pytest.raises(ValidationError):
+        await consultar_historial(RepoRoto(), uuid4(), 5)
+
+
+async def test_buscar_conocimiento_rechaza_entrada_mal_tipada():
+    with pytest.raises(ValidationError):
+        await buscar_conocimiento("press", {"nivel": "experto-galactico"})

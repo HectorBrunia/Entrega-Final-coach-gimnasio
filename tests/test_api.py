@@ -6,17 +6,27 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from langgraph.types import Command, Interrupt
 
-from app.domain.modelos import Ejercicio, EntrenoRegistro, Nivel, Perfil, Rutina
+from app.domain.modelos import (
+    DiaRutina, Ejercicio, EjercicioPlanificado, EntrenoRegistro, Lesion, Nivel, Perfil, Rutina,
+)
 from app.llm import LLMNoDisponible
 from app.main import crear_app
 
 UID = "00000000-0000-0000-0000-000000000001"
 
 
-def _catalogo() -> dict[str, Ejercicio]:
-    return {"sentadilla": Ejercicio(
+_CATALOGO = {
+    "sentadilla": Ejercicio(
         id="sentadilla", nombre="Sentadilla", musculo_primario="cuadriceps",
-        musculos_secundarios=[], equipo="barra", nivel=Nivel.principiante, instrucciones=["x"])}
+        musculos_secundarios=[], equipo="barbell", nivel=Nivel.principiante, instrucciones=["x"]),
+    "press_militar": Ejercicio(
+        id="press_militar", nombre="Press militar", musculo_primario="shoulders",
+        musculos_secundarios=[], equipo="barbell", nivel=Nivel.principiante, instrucciones=["x"]),
+}
+
+
+def _catalogo() -> dict[str, Ejercicio]:
+    return _CATALOGO  # mismo objeto: el indice de bloqueos se cachea por catalogo
 
 
 class RepoFalso:
@@ -24,6 +34,7 @@ class RepoFalso:
         self.entrenos: list[EntrenoRegistro] = []
         self.perfiles: dict[UUID, Perfil] = {}
         self.rutinas: dict[UUID, Rutina] = {}
+        self.lesiones: dict[UUID, list[Lesion]] = {}
         self.llamadas = 0
 
     async def crear_usuario(self) -> UUID:
@@ -38,16 +49,21 @@ class RepoFalso:
         self.llamadas += 1
         return self.rutinas.get(usuario_id)
 
+    async def lesiones_activas(self, usuario_id):
+        self.llamadas += 1
+        return [l for l in self.lesiones.get(usuario_id, []) if l.activa]
+
     async def registrar_entreno(self, entreno):
         self.llamadas += 1
         self.entrenos.append(entreno)
 
 
 class GrafoFalso:
-    def __init__(self, salida=None, error=None, pausado=True):
+    def __init__(self, salida=None, error=None, pausado=False, valores=None):
         self.salida = salida if salida is not None else {"respuesta": "Hola"}
         self.error = error
         self.pausado = pausado
+        self.valores = valores or {}
         self.invocaciones: list[tuple] = []
 
     async def ainvoke(self, entrada, config):
@@ -57,7 +73,12 @@ class GrafoFalso:
         return self.salida
 
     async def aget_state(self, config):
-        return SimpleNamespace(next=("hitl",) if self.pausado else ())
+        # forma de StateSnapshot: una pausa HITL tiene interrupciones pendientes
+        return SimpleNamespace(
+            next=("hitl",) if self.pausado else (),
+            interrupts=(Interrupt(value={"motivo": "dolor_agudo"}),) if self.pausado else (),
+            values=self.valores,
+        )
 
 
 def _cliente(app):
@@ -194,7 +215,7 @@ async def test_rutina_actual_existente():
 
 @pytest.mark.asyncio
 async def test_reanudar_invoca_el_grafo_con_command_resume():
-    grafo = GrafoFalso({"respuesta": "Consulta a un profesional"})
+    grafo = GrafoFalso({"respuesta": "Consulta a un profesional"}, pausado=True)
     app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
     async with _cliente(app) as c:
         r = await c.post(f"/hitl/{UID}/reanudar", json={"revision": "revisado"})
@@ -436,3 +457,116 @@ def test_reglas_invalidas_es_error_fatal_de_arranque():
     from app.safety.reglas import ReglasInvalidas
 
     assert ReglasInvalidas in main_mod.ERRORES_FATALES_ARRANQUE
+
+
+# --- I1: /chat no anula una pausa HITL pendiente ---------------------------------------
+
+@pytest.mark.asyncio
+async def test_chat_sobre_hilo_en_pausa_devuelve_409_y_no_invoca_el_grafo():
+    grafo = GrafoFalso(pausado=True)
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "dame una rutina"})
+    assert r.status_code == 409
+    assert f"/hitl/{UID}/reanudar" in r.json()["detail"]
+    assert grafo.invocaciones == []
+
+
+@pytest.mark.asyncio
+async def test_chat_sobre_hilo_que_fallo_a_mitad_no_es_una_pausa():
+    # un turno que fallo deja `next` sin interrupciones: /chat sigue funcionando
+    class GrafoConTareaPendiente(GrafoFalso):
+        async def aget_state(self, config):
+            return SimpleNamespace(next=("supervisor",), interrupts=(), values={})
+
+    grafo = GrafoConTareaPendiente({"respuesta": "Hola"})
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "hola"})
+    assert r.status_code == 200 and len(grafo.invocaciones) == 1
+
+
+# --- M-b: plantilla de pausa segun el motivo ---------------------------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("motivo, esperado, prohibido", [
+    ("dolor_agudo", "dolor agudo", None),
+    ("zona_sin_regla", "zona que no puedo evaluar", "dolor agudo"),
+    ("escalado_supervisor", "revisión humana", "dolor agudo"),
+])
+async def test_plantilla_de_pausa_segun_el_motivo(motivo, esperado, prohibido):
+    salida = {"__interrupt__": [Interrupt(value={"motivo": motivo, "ejercicio": None,
+                                                  "mensaje": "x"})]}
+    app = crear_app(grafo=GrafoFalso(salida), repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "x"})
+    texto = r.json()["respuesta"]
+    assert esperado in texto
+    assert texto.endswith("Esto no es un diagnóstico médico.")
+    if prohibido:
+        assert prohibido not in texto.lower()
+        assert "Detén ese ejercicio" not in texto
+
+
+# --- I2 / M-c: GET /rutinas/actual nunca sirve una rutina insegura -----------------------
+
+def _rutina(*ids: str) -> Rutina:
+    return Rutina(usuario_id=UUID(UID), version=3, dias=[DiaRutina(nombre="A", ejercicios=[
+        EjercicioPlanificado(ejercicio_id=i, series=3, repeticiones="8", descanso_seg=60,
+                             fuentes=[]) for i in ids])])
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_en_revision_devuelve_409():
+    repo = RepoFalso()
+    repo.rutinas[UUID(UID)] = _rutina("sentadilla")
+    app = crear_app(grafo=GrafoFalso(pausado=True), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 409
+    assert "revisión" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_con_ejercicio_bloqueado_por_lesion_activa_devuelve_409():
+    repo = RepoFalso()
+    repo.rutinas[UUID(UID)] = _rutina("press_militar", "sentadilla")
+    repo.lesiones[UUID(UID)] = [Lesion(zona="hombro_derecho", severidad="leve", activa=True)]
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 409
+    assert "press_militar" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_con_ejercicio_excluido_por_dolor_devuelve_409():
+    repo = RepoFalso()
+    repo.rutinas[UUID(UID)] = _rutina("sentadilla")
+    grafo = GrafoFalso(valores={"ejercicios_excluidos": ["sentadilla"]})
+    app = crear_app(grafo=grafo, repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_segura_con_lesion_en_otra_zona_se_sirve():
+    repo = RepoFalso()
+    repo.rutinas[UUID(UID)] = _rutina("press_militar")
+    repo.lesiones[UUID(UID)] = [Lesion(zona="tobillo", severidad="leve", activa=True)]
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    # la zona sin regla se cubre con la pausa HITL (409 mientras esta pendiente), no aqui
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_rutina_actual_sin_grafo_falla_cerrado_con_503():
+    repo = RepoFalso()
+    repo.rutinas[UUID(UID)] = _rutina("sentadilla")
+    app = crear_app(grafo=None, repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 503
