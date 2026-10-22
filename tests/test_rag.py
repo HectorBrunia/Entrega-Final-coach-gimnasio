@@ -62,20 +62,40 @@ async def test_coleccion_usa_modificador_idf_en_vector_disperso(cliente_qdrant, 
     assert info.config.params.sparse_vectors["disperso"].modifier == Modifier.IDF
 
 
-def test_codificador_disperso_recibe_idioma_de_settings(settings_rag, monkeypatch):
+def test_codificador_disperso_recibe_modelo_e_idioma_de_settings(settings_rag, monkeypatch):
     from app.rag import codificadores
 
     recibidos = []
 
     class BM25Falso:
-        def __init__(self, idioma):
-            recibidos.append(idioma)
+        def __init__(self, modelo, idioma):
+            recibidos.append((modelo, idioma))
 
     monkeypatch.setattr(codificadores, "DispersoBM25", BM25Falso)
     monkeypatch.setattr(codificadores, "_disperso_por_defecto", {})
     codificadores.disperso_desde_settings(settings_rag.model_copy(update={"bm25_idioma": "portuguese"}))
     codificadores.disperso_desde_settings(settings_rag)
-    assert recibidos == ["portuguese", "spanish"]
+    codificadores.disperso_desde_settings(settings_rag.model_copy(update={"bm25_modelo": "otro/bm25"}))
+    codificadores.disperso_desde_settings(settings_rag)  # cacheado por (modelo, idioma)
+    assert recibidos == [("Qdrant/bm25", "portuguese"), ("Qdrant/bm25", "spanish"),
+                         ("otro/bm25", "spanish")]
+
+
+def test_bm25_de_produccion_usa_el_modelo_de_settings(monkeypatch):
+    import sys
+    import types
+
+    from app.rag.codificadores import DispersoBM25
+
+    cargados = []
+
+    class SparseFalso:
+        def __init__(self, nombre, language):
+            cargados.append((nombre, language))
+
+    monkeypatch.setitem(sys.modules, "fastembed", types.SimpleNamespace(SparseTextEmbedding=SparseFalso))
+    DispersoBM25("mi-org/bm25", "spanish")._cargar()
+    assert cargados == [("mi-org/bm25", "spanish")]
 
 
 async def test_coleccion_existente_sin_idf_lanza_incompatible(cliente_qdrant, settings_rag):

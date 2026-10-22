@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     phoenix_collector_endpoint: str
     max_reintentos_seguridad: int = 2
     embedding_model: str
+    bm25_modelo: str = "Qdrant/bm25"
     bm25_idioma: str = "spanish"
     catalogo_path: Path = Path("data/catalogo/exercises.json")
     guias_dir: Path = Path("data/guias")

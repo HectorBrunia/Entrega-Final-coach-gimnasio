@@ -13,6 +13,7 @@ dependencies = [
     "pydantic==2.13.4",
     "pydantic-settings==2.15.0",
     "langgraph==1.2.16",
+    "langgraph-checkpoint==4.3.0",
     "langgraph-checkpoint-redis==0.5.2",
     "langchain-core==1.6.3",
     "langchain-google-genai==4.4.0",
@@ -25,8 +26,10 @@ dependencies = [
     "httpx==0.28.1",
     "redis==8.1.0",
     "arize-phoenix-otel==0.17.2",
+    "openinference-instrumentation==0.1.71",
     "openinference-instrumentation-langchain==0.1.79",
     "opentelemetry-sdk==1.45.1",
+    "orjson==3.12.0",
 ]
 
 [project.optional-dependencies]

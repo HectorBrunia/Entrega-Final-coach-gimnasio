@@ -39,3 +39,13 @@ def test_bm25_idioma_por_defecto_y_desde_entorno(monkeypatch):
     assert Settings(_env_file=None).bm25_idioma == "spanish"
     monkeypatch.setenv("BM25_IDIOMA", "english")
     assert Settings(_env_file=None).bm25_idioma == "english"
+
+
+def test_bm25_modelo_por_defecto_y_desde_entorno(monkeypatch):
+    for k, v in dict(DATABASE_URL="x", REDIS_URL="x", QDRANT_URL="x", QDRANT_COLLECTION="x", GOOGLE_API_KEY="x",
+                     GEMINI_MODEL="x", GEMINI_RPM="1", PHOENIX_COLLECTOR_ENDPOINT="x", EMBEDDING_MODEL="x").items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("BM25_MODELO", raising=False)
+    assert Settings(_env_file=None).bm25_modelo == "Qdrant/bm25"
+    monkeypatch.setenv("BM25_MODELO", "otro/bm25")
+    assert Settings(_env_file=None).bm25_modelo == "otro/bm25"

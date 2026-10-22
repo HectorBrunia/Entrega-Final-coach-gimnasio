@@ -9,7 +9,6 @@ from app.settings import Settings
 
 VECTOR_DENSO = "denso"
 VECTOR_DISPERSO = "disperso"
-MODELO_BM25 = "Qdrant/bm25"
 
 
 class CodificadorDenso(Protocol):
@@ -40,9 +39,10 @@ class DensoSentenceTransformers:
 
 
 class DispersoBM25:
-    """BM25 disperso via fastembed (carga perezosa)."""
+    """BM25 disperso via fastembed (carga perezosa); el modelo sale de Settings.bm25_modelo."""
 
-    def __init__(self, idioma: str):
+    def __init__(self, nombre_modelo: str, idioma: str):
+        self._nombre = nombre_modelo
         self._idioma = idioma
         self._modelo = None
 
@@ -50,7 +50,7 @@ class DispersoBM25:
         if self._modelo is None:
             from fastembed import SparseTextEmbedding
 
-            self._modelo = SparseTextEmbedding(MODELO_BM25, language=self._idioma)
+            self._modelo = SparseTextEmbedding(self._nombre, language=self._idioma)
         return self._modelo
 
     @staticmethod
@@ -65,7 +65,7 @@ class DispersoBM25:
 
 
 _denso_por_defecto: dict[str, DensoSentenceTransformers] = {}
-_disperso_por_defecto: dict[str, DispersoBM25] = {}
+_disperso_por_defecto: dict[tuple[str, str], DispersoBM25] = {}
 
 
 def denso_desde_settings(settings: Settings) -> CodificadorDenso:
@@ -76,10 +76,10 @@ def denso_desde_settings(settings: Settings) -> CodificadorDenso:
 
 
 def disperso_desde_settings(settings: Settings) -> CodificadorDisperso:
-    idioma = settings.bm25_idioma
-    if idioma not in _disperso_por_defecto:
-        _disperso_por_defecto[idioma] = DispersoBM25(idioma)
-    return _disperso_por_defecto[idioma]
+    clave = (settings.bm25_modelo, settings.bm25_idioma)
+    if clave not in _disperso_por_defecto:
+        _disperso_por_defecto[clave] = DispersoBM25(*clave)
+    return _disperso_por_defecto[clave]
 
 
 def cliente_desde_settings(settings: Settings) -> AsyncQdrantClient:
