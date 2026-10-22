@@ -147,10 +147,10 @@ def _ej(id_: str, musculo: str) -> Ejercicio:
 
 
 CATALOGO = {e.id: e for e in [
-    _ej("press_militar", "hombros"),
-    _ej("elevaciones_frontales", "hombros"),
-    _ej("sentadilla", "cuadriceps"),
-    _ej("press_banca", "pecho"),
+    _ej("press_militar", "shoulders"),
+    _ej("elevaciones_frontales", "shoulders"),
+    _ej("sentadilla", "quadriceps"),
+    _ej("press_banca", "chest"),
     _ej("remo_con_barra", "espalda"),
 ]}
 

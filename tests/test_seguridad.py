@@ -4,13 +4,13 @@ from app.safety.reglas import ZonaLesionDesconocida, filtrar_por_lesiones
 from app.domain.modelos import Ejercicio, Lesion, Nivel
 
 
-def _ej(id_):
-    return Ejercicio(id=id_, nombre=id_, musculo_primario="hombro", musculos_secundarios=[],
+def _ej(id_, musculo="shoulders"):
+    return Ejercicio(id=id_, nombre=id_, musculo_primario=musculo, musculos_secundarios=[],
                      equipo="mancuernas", nivel=Nivel.principiante, instrucciones=[])
 
 
 def test_hombro_derecho_bloquea_press_militar():
-    res = filtrar_por_lesiones([_ej("press_militar"), _ej("curl_biceps")],
+    res = filtrar_por_lesiones([_ej("press_militar"), _ej("curl_biceps", "biceps")],
                                [Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])
     assert [e.id for e in res.permitidos] == ["curl_biceps"]
     assert ("press_militar", "hombro_derecho") in res.bloqueados

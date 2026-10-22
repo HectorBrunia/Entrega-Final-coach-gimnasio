@@ -53,7 +53,7 @@ def test_volumen_id_desconocido_lanza():
 
 
 async def test_validar_plan_detecta_ejercicio_bloqueado():
-    catalogo = {"press_militar": _ej("press_militar", "hombro", Nivel.intermedio)}
+    catalogo = {"press_militar": _ej("press_militar", "shoulders", Nivel.intermedio)}
     assert await validar_plan(_plan("press_militar"), HOMBRO, catalogo=catalogo) == ["press_militar"]
 
 

@@ -383,3 +383,56 @@ async def test_error_fatal_de_arranque_detiene_el_lifespan(monkeypatch):
     with pytest.raises(ErrorFatalDePrueba):
         async with app.router.lifespan_context(app):
             pass  # pragma: no cover
+
+
+@pytest.mark.asyncio
+async def test_reglas_invalidas_contra_el_catalogo_detienen_el_arranque(tmp_path):
+    from app.safety.reglas import ReglasInvalidas
+
+    # Catalogo sin ningun ejercicio de hombro, rodilla ni lumbar: las zonas no bloquean nada.
+    ruta = tmp_path / "catalogo.json"
+    ruta.write_text(
+        '[{"id": "Wrist_Curl", "name": "Wrist Curl", "primaryMuscles": ["forearms"],'
+        ' "secondaryMuscles": [], "equipment": "dumbbell", "level": "beginner",'
+        ' "instructions": ["x"]}]',
+        encoding="utf-8",
+    )
+
+    def prohibido(*a, **k):
+        raise AssertionError("no debe construirse el grafo con reglas invalidas")
+
+    cfg = _cfg().model_copy(update={"catalogo_path": ruta})
+    app = crear_app(cfg, repo=RepoFalso(),
+                    constructores=Constructores(checkpointer=prohibido, grafo=prohibido))
+    with pytest.raises(ReglasInvalidas, match="hombro_derecho"):
+        async with app.router.lifespan_context(app):
+            pass  # pragma: no cover
+
+
+@pytest.mark.asyncio
+async def test_lifespan_con_catalogo_real_valida_las_reglas_y_arranca():
+    from pathlib import Path
+
+    ruta = Path(__file__).resolve().parent.parent / "data" / "catalogo" / "exercises.json"
+    cfg = _cfg().model_copy(update={"catalogo_path": ruta})
+
+    def prohibido(*a, **k):
+        raise AssertionError("no debe construirse nada")
+
+    app = crear_app(cfg, grafo=GrafoFalso(), repo=RepoFalso(),
+                    constructores=Constructores(motor=prohibido, checkpointer=prohibido,
+                                                grafo=prohibido))
+    async with app.router.lifespan_context(app):
+        assert len(app.state.catalogo) == 876
+
+
+def test_settings_catalogo_path_por_defecto_es_el_catalogo_real():
+    from pathlib import Path
+
+    assert _cfg().catalogo_path == Path("data/catalogo/exercises.json")
+
+
+def test_reglas_invalidas_es_error_fatal_de_arranque():
+    from app.safety.reglas import ReglasInvalidas
+
+    assert ReglasInvalidas in main_mod.ERRORES_FATALES_ARRANQUE

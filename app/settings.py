@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     max_reintentos_seguridad: int = 2
     embedding_model: str
     bm25_idioma: str = "spanish"
-    catalogo_path: Path = Path("data/catalogo/ejercicios.json")
+    catalogo_path: Path = Path("data/catalogo/exercises.json")
 
 
 @lru_cache

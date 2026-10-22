@@ -18,6 +18,7 @@ from app.api.rutas import (
 )
 from app.domain.modelos import Ejercicio
 from app.llm import LLMNoDisponible
+from app.safety.reglas import ReglasInvalidas, validar_reglas_contra_catalogo
 from app.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def _registrar_manejadores(app: FastAPI) -> None:
 
 
 # Errores de configuracion que deben detener el arranque en vez de degradarlo.
-ERRORES_FATALES_ARRANQUE: tuple[type[BaseException], ...] = ()
+# ReglasInvalidas: las reglas de seguridad no encajan con el catalogo (filtro fallaria abierto).
+ERRORES_FATALES_ARRANQUE: tuple[type[BaseException], ...] = (ReglasInvalidas,)
 
 
 def _crear_motor(url: str):
@@ -85,7 +87,10 @@ def _cargar_catalogo(settings: Settings) -> dict[str, Ejercicio] | None:
     from app.catalogo.cargador import cargar_catalogo
 
     try:
-        return {e.id: e for e in cargar_catalogo(settings.catalogo_path)}
+        catalogo = {e.id: e for e in cargar_catalogo(settings.catalogo_path)}
+        # Reglas desalineadas con el catalogo dejarian pasar ejercicios de riesgo: no se arranca.
+        validar_reglas_contra_catalogo(catalogo)
+        return catalogo
     except ERRORES_FATALES_ARRANQUE:
         raise
     except Exception as exc:  # archivo ausente o catalogo invalido: las rutas responden 503
