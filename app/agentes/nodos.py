@@ -53,7 +53,8 @@ AVISO_MEDICO = "Esto no es un diagnóstico médico."
 
 # Lexico de dolor (raices y frases, sobre texto normalizado: sin mayusculas ni tildes). Una
 # coincidencia en el mensaje ACTUAL basta para pausar a revision humana, diga lo que diga el
-# LLM. Criterio amplio a proposito: ante la duda, escalar.
+# LLM. Criterio amplio a proposito: ante la duda, escalar. Reportar una lesion ("me lesione
+# ...") NO es senal de dolor agudo: va por la ruta de lesiones (registro + bloqueo por zona).
 PATRONES_DOLOR: tuple[str, ...] = (
     r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler
     r"\bduel(?:e|en|a|an)\b",     # duele, duelen
@@ -66,7 +67,6 @@ PATRONES_DOLOR: tuple[str, ...] = (
     r"\bcalambre\w*",
     r"\blastim\w*",
     r"\bhormigue\w*",
-    r"\bme lesion\w*",            # me lesione, me lesiono
     r"\bme hice dano\b",
     r"\bno puedo mover\w*",
     r"\bse me (?:durmio|duerme|duermen|durmieron)\b",

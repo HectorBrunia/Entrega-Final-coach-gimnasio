@@ -287,7 +287,7 @@ async def test_lesion_a_mitad_de_conversacion_revalida_la_rutina_existente(setti
     })
     grafo = await _grafo(settings, repo, llm)
     salida = await grafo.ainvoke(
-        {"usuario_id": usuario, "mensaje": "Tengo una lesion en el hombro derecho"}, config_hilo(usuario))
+        {"usuario_id": usuario, "mensaje": "Me lesione el hombro derecho"}, config_hilo(usuario))
     actual = await repo.rutina_actual(usuario)
     assert "press_militar" not in _ids_rutina(actual)
     assert "sentadilla" in _ids_rutina(actual)
@@ -734,7 +734,7 @@ async def test_rutina_totalmente_bloqueada_no_se_guarda_vacia(settings, repo, us
         "PlanPropuesto": [_plan("press_militar")],  # el programador insiste en algo bloqueado
     })
     grafo = await _grafo(settings, repo, llm)
-    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "tengo una lesion en el hombro"},
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro"},
                                  config_hilo(usuario))
     assert all(_ids_rutina(r) for r in repo.rutinas[usuario])  # ninguna version vacia
     assert len(repo.rutinas[usuario]) == 1
@@ -813,7 +813,7 @@ async def test_revalidar_rutina_existente_no_muestra_volumen_obsoleto(settings, 
     llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
         Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])]})
     grafo = await _grafo(settings, repo, llm)
-    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "tengo una lesion en el hombro"},
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro"},
                                  config_hilo(usuario))
     assert "Retiré 1 ejercicio" in salida["respuesta"]
     assert "Volumen semanal" not in salida["respuesta"]
@@ -876,7 +876,6 @@ async def _pausa_por_dolor_y_reanuda(settings, repo, usuario, *siguientes: Anali
     "me hice daño en la muñeca",
     "no puedo mover el brazo",
     "se me durmió la mano",
-    "me lesioné el tobillo",
     "siento una punzada",
     "noté un pinchazo",
 ])
@@ -889,6 +888,7 @@ def test_senal_de_dolor_en_el_mensaje(texto):
     "Quiero ganar fuerza con barra",
     "registra mi entreno de ayer por la tarde",
     "tengo 100 dolares para equipo",
+    "Ayer me lesioné el hombro derecho",  # una lesion va por la ruta de lesiones, no por HITL
 ])
 def test_sin_senal_de_dolor(texto):
     assert not detectar_dolor_agudo(texto)
@@ -1013,7 +1013,7 @@ async def test_lesion_repetida_en_la_misma_zona_no_se_duplica(settings, repo, us
     })
     grafo = await _grafo(settings, repo, llm)
     cfg = config_hilo(usuario)
-    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "tengo una lesion en el hombro derecho"}, cfg)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro derecho"}, cfg)
     salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "Dame una rutina nueva"}, cfg)
     assert len(repo.lesiones[usuario]) == 1
     assert salida["lesion_nueva"] is False
@@ -1146,3 +1146,19 @@ async def test_hilo_irrecuperable_se_reinicia_y_responde_409(settings, repo, usu
         # el siguiente mensaje empieza un hilo limpio
         r = await c.post("/chat", json={"usuario_id": uid, "mensaje": "hola"})
         assert r.status_code == 200, r.text
+
+
+async def test_reportar_una_lesion_la_registra_y_bloquea_sin_pausa_de_dolor(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[
+        LesionReportada(zona="hombro_derecho", severidad="moderada")])]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "Ayer me lesioné el hombro derecho"}, config_hilo(usuario))
+    assert "__interrupt__" not in salida
+    assert salida["requiere_humano"] is False
+    assert salida["motivo_humano"] is None
+    assert [l.zona for l in repo.lesiones[usuario]] == ["hombro_derecho"]
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
+    assert "press_militar" not in salida["respuesta"] and "press militar" not in salida["respuesta"]
