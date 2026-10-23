@@ -194,7 +194,7 @@ Detalles que el diagrama resume:
 | Checkpointer | [app/agentes/checkpointer.py](app/agentes/checkpointer.py): `AsyncRedisSaver` con serializador que conserva los tipos del estado; Redis con AOF y volumen ([docker-compose.yml](docker-compose.yml)); comprobación de reinicio con [scripts/verificar_persistencia_redis.py](scripts/verificar_persistencia_redis.py) |
 | Pydantic | Esquemas de la API ([app/api/esquemas.py](app/api/esquemas.py)), modelos de dominio ([app/domain/modelos.py](app/domain/modelos.py)), herramientas validadas en tiempo de ejecución con `pydantic.validate_call` (entradas y salidas, [app/herramientas/funciones.py](app/herramientas/funciones.py); `volumen_semanal` resume las series por músculo de cada rutina nueva), salidas estructuradas del LLM y configuración con pydantic-settings ([app/settings.py](app/settings.py)) |
 | Observabilidad | [app/observabilidad.py](app/observabilidad.py): Phoenix + OpenInference; cada petición a `/chat` y `/hitl/.../reanudar` abre un span con `thread_id` y `usuario_id`, del que cuelgan los spans del grafo y del LLM |
-| 5 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding, ajuste semanal, lesión activa (dos pruebas), dolor agudo y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
+| 6 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding, ajuste semanal, lesión activa, lesión nueva, dolor agudo con pausa y reanudación y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
 | README y diagrama | Este archivo (diagrama Mermaid del grafo) |
 | Despliegue local con un comando | [run.sh](run.sh) / [run.ps1](run.ps1), [docker-compose.yml](docker-compose.yml) y [Dockerfile](Dockerfile); imágenes y dependencias con versión fija |
 
@@ -267,11 +267,18 @@ el [golden set](evaluacion/golden_set.json) y escribe
 |---|---|
 | Recuperación | 13 casos, 12 aciertos: hit rate@5 = 0,923, MRR@5 = 0,731 (falla R12) |
 | Seguridad determinista | 5 casos: 0 violaciones, 0 sobrebloqueos, 0 ids fuera del catálogo |
-| Seguridad del grafo | Omitida en esta ejecución: faltaba `GOOGLE_API_KEY` |
+| Seguridad del grafo | 5 casos, 5 rutinas generadas: 0 violaciones, 0 respuestas sin aviso (Gemini real, modelo `gemini-3.5-flash-lite`) |
 
 La seguridad del grafo pide rutinas reales a Gemini y comprueba que la rutina guardada no
 contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_API_KEY` y
-`TEST_DATABASE_URL`.
+`TEST_DATABASE_URL`, y consume la cuota de tu clave.
+
+### Resultados de las pruebas de sistema
+
+`pytest tests/sistema -m sistema` contra Gemini real (modelo `gemini-3.5-flash-lite`) con el
+stack completo de docker: 6 pruebas pasadas (onboarding, ajuste semanal, lesión activa, lesión
+nueva, dolor agudo con pausa y reanudación, fuera de alcance), cada una con su traza en Phoenix.
+Cinco ejecuciones consecutivas en verde sobre el código final.
 
 ## Fuentes y licencias
 
@@ -303,6 +310,3 @@ contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_AP
 - **Dos citas de las guías marcadas «(verificar referencia)»:** la de la NSCA en
   [data/guias/tecnica_basica.md](data/guias/tecnica_basica.md) y la del ACSM en
   [data/guias/consideraciones_por_zona_lesion.md](data/guias/consideraciones_por_zona_lesion.md).
-- **Pruebas de sistema con clave real.** Hay que ejecutarlas con una `GOOGLE_API_KEY` válida
-  (`pytest tests/sistema -m sistema`) y revisar sus trazas en Phoenix; la parte de seguridad del
-  grafo de la evaluación también requiere la clave.

@@ -140,7 +140,7 @@ _PATRONES_RESPIRACION_DEGRADABLE = tuple(re.compile(p) for p in PATRONES_RESPIRA
 # Contexto de tecnica o de mejorar la forma fisica (sin "reposo": "me falta el aire incluso en
 # reposo" es una urgencia).
 _CONTEXTO_ENTRENAMIENTO = re.compile(
-    r"\bmejor(?:ar|o|e|ando)\b|\btecnica\b|\bfondo\b|\bresistencia\b|¿\s*como\b|\bcardio\b"
+    r"\bmejor(?:ar|o|e|ando)\b|\btecnica\b|\bfondo\b|\bresistencia\b|\bcardio\b"
     r"|\bhiit\b|\bseries?\b|\bzonas?\b"
 )
 # Nivel 3: terminos ambiguos de entrenamiento (nunca 112 por si solos).

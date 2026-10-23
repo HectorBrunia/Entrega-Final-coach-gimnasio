@@ -1527,6 +1527,33 @@ async def test_contexto_de_gimnasio_no_pausa(settings, repo, usuario, mensaje):
     assert "__interrupt__" not in salida
 
 
+@pytest.mark.parametrize("mensaje", ["me falta el aire, ¿cómo hago para que pare?"])
+async def test_falta_de_aire_con_como_no_se_rebaja_y_da_112_sin_el_llm(settings, repo, usuario, mensaje):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+@pytest.mark.parametrize("mensaje", [
+    "¿cómo respiro en la sentadilla?",
+    "no puedo respirar bien en la sentadilla, ¿cómo mejoro la técnica?",
+    "¿a cuánto late el corazón en cardio?",
+    "¿cómo mejoro mi fondo?",
+])
+async def test_preguntas_con_como_de_entrenamiento_no_pausan(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert not detectar_dolor_pecho(mensaje)
+    assert not detectar_dolor_agudo(mensaje)
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="sintesis")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": mensaje}, config_hilo(usuario))
+    assert "__interrupt__" not in salida
+
+
 @pytest.mark.parametrize("zona", ["pecho", "tórax", "corazón", "esternón", "costillas", "torso",
                                   "brazo izquierdo"])
 def test_zonas_toracicas_del_llm(zona):
