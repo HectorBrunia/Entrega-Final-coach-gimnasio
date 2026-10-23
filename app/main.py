@@ -33,8 +33,8 @@ def _json(status: int, detalle: str) -> JSONResponse:
 
 def _registrar_manejadores(app: FastAPI) -> None:
     @app.exception_handler(LLMNoDisponible)
-    async def _llm(_: Request, __: LLMNoDisponible):
-        return _json(503, "El servicio de lenguaje no está disponible; inténtalo más tarde")
+    async def _llm(_: Request, exc: LLMNoDisponible):
+        return _json(503, exc.mensaje_publico)
 
     @app.exception_handler(ServicioNoDisponible)
     async def _servicio(_: Request, exc: ServicioNoDisponible):

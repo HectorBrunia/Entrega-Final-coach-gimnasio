@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     gemini_rpm: int
     phoenix_collector_endpoint: str
     max_reintentos_seguridad: int = 2
+    llm_reintentos: int = 3
+    llm_espera_base: float = 2.0
+    llm_espera_max: float = 20.0
     embedding_model: str
     bm25_modelo: str = "Qdrant/bm25"
     bm25_idioma: str = "spanish"

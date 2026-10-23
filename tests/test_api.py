@@ -9,7 +9,7 @@ from langgraph.types import Command, Interrupt
 from app.domain.modelos import (
     DiaRutina, Ejercicio, EjercicioPlanificado, EntrenoRegistro, Lesion, Nivel, Perfil, Rutina,
 )
-from app.llm import LLMNoDisponible
+from app.llm import MSG_CONFIGURACION, MSG_TRANSITORIO, LLMNoDisponible
 from app.main import crear_app
 
 UID = "00000000-0000-0000-0000-000000000001"
@@ -170,6 +170,76 @@ async def test_chat_con_llm_no_disponible_devuelve_503():
     assert r.status_code == 503
     assert "secreto" not in r.text
     assert "Traceback" not in r.text
+
+
+def _grafo_con_llm_que_falla(monkeypatch, error):
+    """Grafo LangGraph real cuyo nodo llama a Gemini (parcheado) con reintentos minimos."""
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from typing_extensions import TypedDict
+
+    from app.llm import crear_llm
+    from app.settings import Settings
+
+    async def _falso(self, messages, stop=None, run_manager=None, **kwargs):
+        raise error
+
+    monkeypatch.setattr(ChatGoogleGenerativeAI, "_agenerate", _falso)
+    cfg = Settings(
+        database_url="postgresql+asyncpg://x:x@localhost/x", redis_url="redis://x",
+        qdrant_url="http://x", qdrant_collection="c", google_api_key="k", gemini_model="m",
+        gemini_rpm=6000, phoenix_collector_endpoint="http://x", embedding_model="e")
+    llm = crear_llm(cfg, reintentos=1, espera_base=0.0)
+
+    class Estado(TypedDict, total=False):
+        respuesta: str
+
+    async def nodo(_estado):
+        return {"respuesta": (await llm.ainvoke("hola")).content}
+
+    g = StateGraph(Estado)
+    g.add_node("evaluador", nodo)
+    g.add_edge(START, "evaluador")
+    g.add_edge("evaluador", END)
+    return g.compile(checkpointer=MemorySaver())
+
+
+def _error_503():
+    from langchain_google_genai.chat_models import GoogleAPIError
+    return GoogleAPIError(code=503, response_json={"error": {"status": "UNAVAILABLE",
+                          "message": "high demand secreto"}}, response=None)
+
+
+def _error_401():
+    from langchain_google_genai.chat_models import GoogleAuthenticationError
+    return GoogleAuthenticationError("401 UNAUTHENTICATED api key secreto")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fabrica,mensaje", [
+    (_error_503, MSG_TRANSITORIO), (_error_401, MSG_CONFIGURACION)])
+async def test_chat_con_error_del_proveedor_en_nodo_devuelve_503_claro(
+        monkeypatch, fabrica, mensaje):
+    grafo = _grafo_con_llm_que_falla(monkeypatch, fabrica())
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post("/chat", json={"usuario_id": UID, "mensaje": "hola"})
+    assert r.status_code == 503
+    assert r.json() == {"detail": mensaje}
+    assert "secreto" not in r.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("motivo,mensaje", [
+    ("transitorio", MSG_TRANSITORIO), ("permanente", MSG_CONFIGURACION)])
+async def test_reanudar_con_llm_no_disponible_devuelve_503_claro(motivo, mensaje):
+    grafo = GrafoFalso(error=LLMNoDisponible("detalle secreto", motivo=motivo), pausado=True)
+    app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.post(f"/hitl/{UID}/reanudar", json={"revision": "aprobar"})
+    assert r.status_code == 503
+    assert r.json() == {"detail": mensaje}
 
 
 @pytest.mark.asyncio

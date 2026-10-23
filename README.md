@@ -101,10 +101,12 @@ un aviso en el log. Así el filtro por equipo del programador acota de verdad lo
 `GEMINI_MODEL` es configurable. Se recomienda un modelo *flash-lite* (por ejemplo
 `gemini-2.5-flash-lite`) por los límites del plan gratuito; comprueba en Google AI Studio qué
 modelos tiene disponibles tu clave. `GEMINI_RPM` (14 por defecto) limita las peticiones por
-minuto, y ante un HTTP 429 la llamada se reintenta con espera exponencial
-([app/llm.py](app/llm.py)). Si los reintentos se agotan, `/chat` responde 503. Otros errores
-del proveedor (por ejemplo, una clave inválida) responden 500 con `{"detail": "Error interno"}`
-y la API sigue en servicio.
+minuto. Ante errores transitorios del proveedor (HTTP 429 y 5xx como 503 UNAVAILABLE) la
+llamada se reintenta con espera exponencial ([app/llm.py](app/llm.py)); `LLM_REINTENTOS` (3),
+`LLM_ESPERA_BASE` (2 s) y `LLM_ESPERA_MAX` (20 s) lo configuran. Si los reintentos se agotan,
+`/chat` y `/hitl` responden 503 ("servicio del modelo saturado o caído"). Un error permanente
+(clave o modelo inválidos, 4xx) no se reintenta y responde 503 ("error de configuración del
+modelo"). En ambos casos el detalle va al log, nunca a la respuesta, y la API sigue en servicio.
 
 Los modelos del RAG también salen del entorno: `EMBEDDING_MODEL` (embeddings densos) y
 `BM25_MODELO` (BM25 disperso de fastembed, `Qdrant/bm25` por defecto, con `BM25_IDIOMA`).
