@@ -97,6 +97,12 @@ class AnalisisMensaje(BaseModel):
     ejercicio_con_dolor: str | None = Field(
         default=None, description="Id del ejercicio que le provoca dolor, si lo menciona en el mensaje actual."
     )
+    zona_dolor: str | None = Field(
+        default=None, description=(
+            "Si dolor_agudo es true: zona del cuerpo del dolor del mensaje actual (p. ej. pecho, "
+            "hombro, rodilla, espalda)."
+        ),
+    )
     cita_dolor: str | None = Field(
         default=None, description=(
             "Si dolor_agudo es true: fragmento copiado literalmente del mensaje actual donde el "

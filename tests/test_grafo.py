@@ -1359,3 +1359,108 @@ async def test_get_rutina_409_tras_reiniciar_el_hilo_si_la_rutina_guardada_tiene
         r = await c.get(f"/usuarios/{usuario}/rutinas/actual")
     assert r.status_code == 409, r.text
     assert "ya no es segura" in r.json()["detail"]
+
+
+# --- I-1: la urgencia por dolor en el pecho no depende solo del lexico -----------------------
+
+SONDA_DOLOR_EXTRA = [
+    "me caí de la cinta", "me sangra la rodilla", "me cedió el hombro en el press",
+    "me falla la rodilla", "me falla el tobillo al saltar", "creo que me he roto el dedo",
+    "me retorcí el tobillo", "me he hecho polvo la rodilla", "estoy fatal de la rodilla",
+    "fatal de la espalda",
+]
+
+
+@pytest.mark.parametrize("texto", SONDA_DOLOR_EXTRA)
+def test_sonda_extra_de_lesion_aguda_escala(texto):
+    assert detectar_dolor_agudo(texto)
+
+
+@pytest.mark.parametrize("texto", [
+    "me falla la técnica en la sentadilla", "quiero mejorar mi respiración",
+    "el pecho me ha crecido", "press de pecho", "me encanta el press",
+])
+def test_frases_de_gimnasio_extra_no_escalan(texto):
+    assert not detectar_dolor_agudo(texto)
+
+
+@pytest.mark.parametrize("texto", [
+    "siento presión en el pecho", "se me oprime el pecho", "me ahogo al subir escaleras",
+    "no puedo respirar bien", "me arde el pecho", "me pincha el tórax",
+    "noto peso en el pecho", "me falta el aire", "falta de aire al correr",
+    "me cuesta respirar",
+])
+def test_detector_de_pecho(texto):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert detectar_dolor_pecho(texto)
+    assert detectar_dolor_agudo(texto)  # siempre escala
+
+
+async def _chat_pausa(settings, repo, usuario, mensaje, analisis):
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [analisis]})
+    grafo = await _grafo(settings, repo, llm)
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.post("/chat", json={"usuario_id": str(usuario), "mensaje": mensaje})
+    assert r.status_code == 200, r.text
+    assert r.json()["requiere_humano"] is True
+    estado = await grafo.aget_state(config_hilo(usuario))
+    return r.json()["respuesta"], estado.interrupts[0].value["motivo"]
+
+
+@pytest.mark.parametrize("mensaje", [
+    "siento presión en el pecho", "se me oprime el pecho", "me ahogo al subir escaleras",
+    "no puedo respirar bien", "me arde el pecho",
+])
+async def test_pecho_por_la_api_usa_la_plantilla_de_urgencia(settings, repo, usuario, mensaje):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta and "atención médica inmediata" in respuesta
+
+
+async def test_pecho_marcado_por_el_llm_con_cita_valida_usa_la_plantilla_de_urgencia(
+    settings, repo, usuario
+):
+    mensaje = "Noto algo raro en el torso cuando corro"
+    assert not detectar_dolor_agudo(mensaje)  # sin lexico: solo el LLM lo detecta
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje(
+        dolor_agudo=True, cita_dolor="algo raro en el torso", zona_dolor="pecho"))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+async def test_dolor_no_toracico_marcado_por_el_llm_sigue_siendo_dolor_agudo(
+    settings, repo, usuario
+):
+    respuesta, motivo = await _chat_pausa(
+        settings, repo, usuario, "Noto algo raro en el hombro al empujar",
+        AnalisisMensaje(dolor_agudo=True, cita_dolor="algo raro en el hombro", zona_dolor="hombro"))
+    assert motivo == "dolor_agudo"
+    assert "112" not in respuesta
+
+
+async def test_dolor_no_toracico_por_lexico_sigue_siendo_dolor_agudo(settings, repo, usuario):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, "me duele la rodilla",
+                                          AnalisisMensaje())
+    assert motivo == "dolor_agudo"
+    assert "112" not in respuesta
+
+
+async def test_pecho_gana_a_zona_sin_regla(settings, repo, usuario):
+    respuesta, motivo = await _chat_pausa(
+        settings, repo, usuario, "me caí y siento presión en el pecho",
+        AnalisisMensaje(lesiones_nuevas=[LesionReportada(zona="otra", descripcion="costillas",
+                                                         severidad="moderada")]))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+async def test_sobre_escalado_aceptado_flexiones_de_pecho_con_ardor_en_los_brazos(
+    settings, repo, usuario
+):
+    # documentado: "pecho" + senal de dolor en el mismo mensaje se trata como urgencia aunque el
+    # dolor sea en los brazos (fallo seguro aceptado por el controlador)
+    _, motivo = await _chat_pausa(
+        settings, repo, usuario, "hago flexiones de pecho en casa y me arden los brazos",
+        AnalisisMensaje())
+    assert motivo == "dolor_pecho"

@@ -55,17 +55,30 @@ AVISO_MEDICO = "Esto no es un diagnóstico médico."
 # coincidencia en el mensaje ACTUAL basta para pausar a revision humana, diga lo que diga el
 # LLM. Criterio amplio a proposito: ante la duda, escalar. Reportar una lesion ("me lesione
 # ...") NO es senal de dolor agudo: va por la ruta de lesiones (registro + bloqueo por zona).
-# Dolor u opresion en el pecho y falta de aire: senal de urgencia. Siempre escala a HITL y la
-# plantilla (fija, sin LLM) recomienda atencion medica inmediata.
-PATRONES_PECHO: tuple[str, ...] = (
-    r"\bopresi\w*",                                   # opresion (en el pecho)
-    r"\baprieta\w* (?:el |en el )?pecho\b",           # me aprieta el pecho
-    r"\b(?:me cuesta|no puedo) respirar\b",           # dificultad para respirar
-    r"\bfalta (?:de )?aire\b",                        # me falta el aire / falta de aire
-    r"\bme falta el aire\b",
+# Urgencia toracica (motivo dolor_pecho: plantilla fija con 112 y atencion medica inmediata).
+# 1) Dificultad para respirar, por si sola:
+PATRONES_RESPIRACION: tuple[str, ...] = (
+    r"\bme ahog\w*",                          # me ahogo, me ahogaba
+    r"\bno puedo respirar\b",                 # no puedo respirar (bien)
+    r"\bme cuesta respirar\b",                # me cuesta respirar
+    r"\bme falta el aire\b",                  # me falta el aire
+    r"\bfalta (?:de )?aire\b",                # falta de aire
 )
-_PATRONES_PECHO = tuple(re.compile(p) for p in PATRONES_PECHO)
-_PECHO = re.compile(r"\bpecho\b")
+_PATRONES_RESPIRACION = tuple(re.compile(p) for p in PATRONES_RESPIRACION)
+# 2) Zona toracica mencionada junto con cualquiera de estas senales (en el mismo mensaje):
+_ZONA_PECHO = re.compile(r"\b(?:pecho|torax|toracic\w*)\b")
+PATRONES_SENAL_PECHO: tuple[str, ...] = (
+    r"\bdol(?:or|i|e)\w*|\bduel(?:e|en)\b",   # dolor, me duele
+    r"\bpresi\w*",                            # presion en el pecho
+    r"\bopresi\w*",                           # opresion
+    r"\boprim\w*",                            # se me oprime
+    r"\bapriet\w*|\baprieta\w*",              # me aprieta, apretado
+    r"\bard(?:e|en|er|or|ia|io|iendo|ido|ida)\w*",  # arde, ardor
+    r"\bpinch\w*",                            # pincha, pinchazo
+    r"\bpunz\w*",                             # punzada
+    r"\bpeso en\b",                           # peso en el pecho
+)
+_PATRONES_SENAL_PECHO = tuple(re.compile(p) for p in PATRONES_SENAL_PECHO)
 
 PATRONES_DOLOR: tuple[str, ...] = (
     r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler (no "dolar")
@@ -108,7 +121,16 @@ PATRONES_DOLOR: tuple[str, ...] = (
     r"\bme hice dano\b",          # me hice dano
     r"\bno (?:me )?puedo (?:mover|levantar|apoyar|doblar|estirar|agachar|girar)\w*",
     r"\bse me (?:durmio|duerme|duermen|durmieron)\b",  # se me durmio la mano
-    *PATRONES_PECHO,
+    r"\bopresi\w*",               # opresion (en cualquier zona)
+    r"\bme ca(?:i|igo|ido)\b|\bme he caido\b",  # me cai, me he caido
+    r"\bsangr(?:a|an|ando|ado|o)\b",  # me sangra (no "sangre")
+    r"\bme (?:ha )?cedi(?:o|do)\b",   # me cedio el hombro
+    r"\bme falla(?:n|ba)? (?:la|el|las|los) (?:rodilla|tobillo|hombro|espalda|muneca|codo|"
+    r"cadera|pierna|brazo|rodillas|tobillos|hombros)s?\b",  # me falla la rodilla (no "la tecnica")
+    r"\b(?:me )?he roto\b",       # me he roto el dedo
+    r"\bretorc[ie]\w*",           # me retorci el tobillo
+    r"\bhecho polvo\b",           # me he hecho polvo la rodilla (tambien cansancio: fallo seguro)
+    r"\bfatal de (?:la|el|las|los|mi|mis)\b",  # fatal de la rodilla
 )
 _PATRONES_DOLOR = tuple(re.compile(p) for p in PATRONES_DOLOR)
 
@@ -181,18 +203,30 @@ def _normalizar(texto: str) -> str:
     return " ".join(sin_tildes.lower().replace("_", " ").split())
 
 
-def detectar_dolor_agudo(mensaje: str) -> bool:
-    """Chequeo determinista: una senal del lexico de dolor en el mensaje basta para escalar."""
-    texto = _normalizar(mensaje)
-    return any(p.search(texto) for p in _PATRONES_DOLOR)
+def _senal_lexico(texto_norm: str) -> bool:
+    return any(p.search(texto_norm) for p in _PATRONES_DOLOR)
 
 
 def detectar_dolor_pecho(mensaje: str) -> bool:
-    """Dolor, opresion o falta de aire en el pecho: urgencia (siempre HITL y atencion inmediata)."""
+    """Urgencia toracica: dificultad para respirar, o pecho/torax junto con una senal de dolor,
+    presion u opresion (o cualquier senal del lexico) en el mismo mensaje. Fallo seguro: el
+    dolor puede estar en otra zona del mensaje ("flexiones de pecho... me arden los brazos")."""
     texto = _normalizar(mensaje)
-    if any(p.search(texto) for p in _PATRONES_PECHO):
+    if any(p.search(texto) for p in _PATRONES_RESPIRACION):
         return True
-    return bool(_PECHO.search(texto)) and detectar_dolor_agudo(mensaje)
+    if not _ZONA_PECHO.search(texto):
+        return False
+    return any(p.search(texto) for p in _PATRONES_SENAL_PECHO) or _senal_lexico(texto)
+
+
+def detectar_dolor_agudo(mensaje: str) -> bool:
+    """Chequeo determinista: una senal del lexico de dolor (o la urgencia toracica) basta para
+    escalar."""
+    return _senal_lexico(_normalizar(mensaje)) or detectar_dolor_pecho(mensaje)
+
+
+def es_zona_pecho(zona: str | None) -> bool:
+    return bool(zona) and _ZONA_PECHO.search(_normalizar(zona)) is not None
 
 
 CITA_MIN_PALABRAS = 2
@@ -389,7 +423,7 @@ class Nodos:
         for heredado in (e for e in excluidos if e not in persistidos):
             # exclusion que solo vivia en un checkpoint anterior: pasa a ser dato de dominio
             await self.repo.agregar_exclusion(uid, heredado)
-        dolor, ejercicio = self._dolor_del_mensaje(mensaje, analisis, dolor_por_palabra)
+        dolor, ejercicio, pecho = self._dolor_del_mensaje(mensaje, analisis, dolor_por_palabra)
         if dolor:
             if ejercicio in self.catalogo:
                 # dato de dominio: sobrevive a un reinicio del hilo (regla E)
@@ -415,8 +449,9 @@ class Nodos:
             "volumen": None,
             "lesion_nueva": lesion_nueva,
             "requiere_humano": dolor,
-            "motivo_humano": (MOTIVO_PECHO if detectar_dolor_pecho(mensaje) else MOTIVO_DOLOR)
-            if dolor else None,
+            # dolor_pecho gana a cualquier otro motivo (las demas guardas no lo sobrescriben
+            # porque requiere_humano ya esta activo)
+            "motivo_humano": (MOTIVO_PECHO if pecho else MOTIVO_DOLOR) if dolor else None,
             "ejercicio_con_dolor": (ejercicio or analisis.ejercicio_con_dolor) if dolor else None,
             "ejercicios_excluidos": excluidos,
             "explicacion": "",
@@ -427,8 +462,9 @@ class Nodos:
 
     def _dolor_del_mensaje(
         self, mensaje: str, analisis: AnalisisMensaje, por_lexico: bool
-    ) -> tuple[bool, str | None]:
+    ) -> tuple[bool, str | None, bool]:
         """Decide de forma determinista si el mensaje ACTUAL reporta dolor que escala a humano.
+        Devuelve (escala, ejercicio, es_urgencia_toracica).
 
         - senal del lexico de dolor en el mensaje actual: escala siempre, aunque el ejercicio ya
           este excluido (dolor renovado);
@@ -443,11 +479,17 @@ class Nodos:
                 "no se escala (cita=%r)", analisis.cita_dolor,
             )
         if not (por_lexico or llm_valido):
-            return False, None
+            return False, None, False
         ejercicio = self._resolver_ejercicio(analisis.ejercicio_con_dolor) or self._ejercicio_en_texto(
             mensaje
         )
-        return True, ejercicio
+        # urgencia toracica: por el detector determinista sobre el mensaje, o por el LLM con cita
+        # verificada cuya zona es el pecho (o cuya cita ya es toracica)
+        pecho = detectar_dolor_pecho(mensaje) or (
+            llm_valido and (es_zona_pecho(analisis.zona_dolor)
+                            or detectar_dolor_pecho(analisis.cita_dolor or ""))
+        )
+        return True, ejercicio, pecho
 
     async def _registrar_lesiones(
         self, uid: UUID, previas: list[Lesion], reportadas: list[LesionReportada]
