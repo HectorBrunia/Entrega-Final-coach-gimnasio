@@ -291,10 +291,15 @@ contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_AP
   en español (raíces y frases sobre el mensaje actual) y, como segunda red, en el LLM, cuya
   señal solo cuenta si cita literalmente el mensaje actual. No reconoce todas las formas de
   describir un síntoma. El coach no es un dispositivo médico ni sustituye una valoración
-  profesional. Ante síntomas de pecho o cardiacos (dolor u opresión en el pecho, falta de aire,
-  palpitaciones, brazo izquierdo dormido o sensación de desmayo) la conversación se pausa y responde
-  con un mensaje fijo que indica llamar al 112 o acudir a urgencias. Los falsos positivos
-  (pausas de más ante frases inocuas) son deliberados.
+  profesional. Los síntomas cardiacos se clasifican en tres niveles: (1) síntomas inequívocos
+  (dolor, presión o pesadez en el pecho, dificultad respiratoria grave, desmayo o pérdida de
+  conocimiento, sudor frío, palpitaciones, brazo izquierdo dormido) pausan con un mensaje fijo
+  que indica llamar al 112; (2) el LLM puede marcar otros síntomas (`sintoma_cardiaco`, con cita
+  literal del mensaje) y también dan ese mensaje; (3) términos ambiguos de entrenamiento
+  (frecuencia cardiaca, «sin aliento» al hablar de mejorar el fondo, pecho cargado de agujetas)
+  nunca dan el 112 por sí solos y solo pausan si van con una señal de dolor. Por eso un sinónimo
+  raro que el léxico no reconoce depende del LLM. Los falsos positivos (pausas de más ante
+  frases inocuas) son deliberados.
 - **Dos citas de las guías marcadas «(verificar referencia)»:** la de la NSCA en
   [data/guias/tecnica_basica.md](data/guias/tecnica_basica.md) y la del ACSM en
   [data/guias/consideraciones_por_zona_lesion.md](data/guias/consideraciones_por_zona_lesion.md).

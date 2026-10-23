@@ -109,6 +109,22 @@ class AnalisisMensaje(BaseModel):
             "usuario reporta el dolor. Vacio si el dolor no esta en el mensaje actual."
         ),
     )
+    sintoma_cardiaco: bool = Field(
+        default=False,
+        description=(
+            "True solo si el mensaje actual describe un sintoma propio que puede ser una urgencia "
+            "cardiaca o respiratoria (dolor, presion o pesadez en el pecho, falta de aire anormal, "
+            "corazon desbocado o irregular, desmayo, sudor frio, dolor irradiado al brazo "
+            "izquierdo o la mandibula). False para charla de entrenamiento: frecuencia cardiaca "
+            "o zonas, pulso en reposo, tecnica de respiracion, mejorar el fondo, agujetas."
+        ),
+    )
+    cita_sintoma: str | None = Field(
+        default=None, description=(
+            "Si sintoma_cardiaco es true: fragmento copiado literalmente del mensaje actual que "
+            "describe el sintoma."
+        ),
+    )
 
 
 class DecisionSupervisor(BaseModel):

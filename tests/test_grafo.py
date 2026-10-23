@@ -1251,7 +1251,7 @@ def test_pecho_sin_dolor_no_es_urgencia(texto):
     assert not detectar_dolor_pecho(texto)
 
 
-async def test_dolor_en_el_pecho_pausa_con_plantilla_de_atencion_medica_inmediata(
+async def test_dolor_en_el_pecho_pausa_con_plantilla_de_atencion_medica_urgente(
     settings, repo, usuario
 ):
     llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
@@ -1262,11 +1262,11 @@ async def test_dolor_en_el_pecho_pausa_con_plantilla_de_atencion_medica_inmediat
                                         "mensaje": "me cuesta respirar y me aprieta el pecho"})
         assert r.status_code == 200 and r.json()["requiere_humano"] is True
         pausa = r.json()["respuesta"].lower()
-        assert "atención médica inmediata" in pausa and "112" in pausa
+        assert "atención médica urgente" in pausa and "112" in pausa
         assert AVISO_MEDICO.lower() in pausa
         r = await c.post(f"/hitl/{uid}/reanudar", json={"revision": "ok"})
         final = r.json()["respuesta"].lower()
-        assert "atención médica inmediata" in final and "112" in final
+        assert "atención médica urgente" in final and "112" in final
     assert "DecisionSupervisor" not in llm.llamadas
 
 
@@ -1415,7 +1415,7 @@ async def _chat_pausa(settings, repo, usuario, mensaje, analisis):
 async def test_pecho_por_la_api_usa_la_plantilla_de_urgencia(settings, repo, usuario, mensaje):
     respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
     assert motivo == "dolor_pecho"
-    assert "112" in respuesta and "atención médica inmediata" in respuesta
+    assert "112" in respuesta and "atención médica urgente" in respuesta
 
 
 async def test_pecho_marcado_por_el_llm_con_cita_valida_usa_la_plantilla_de_urgencia(
@@ -1455,15 +1455,16 @@ async def test_pecho_gana_a_zona_sin_regla(settings, repo, usuario):
     assert "112" in respuesta
 
 
-async def test_sobre_escalado_aceptado_flexiones_de_pecho_con_ardor_en_los_brazos(
+async def test_flexiones_de_pecho_con_ardor_en_los_brazos_pausa_generica(
     settings, repo, usuario
 ):
-    # documentado: "pecho" + senal de dolor en el mismo mensaje se trata como urgencia aunque el
-    # dolor sea en los brazos (fallo seguro aceptado por el controlador)
-    _, motivo = await _chat_pausa(
+    # regla K: "flexiones de pecho" es ejercicio, no zona del sintoma; el ardor en los brazos
+    # sigue pausando (dolor agudo), pero ya no es urgencia 112 (antes sobre-escalado aceptado)
+    respuesta, motivo = await _chat_pausa(
         settings, repo, usuario, "hago flexiones de pecho en casa y me arden los brazos",
         AnalisisMensaje())
-    assert motivo == "dolor_pecho"
+    assert motivo == "dolor_agudo"
+    assert "112" not in respuesta
 
 
 # --- Re-revision 3: senales cardiacas y contexto de gimnasio con "pecho" ---------------------
@@ -1478,7 +1479,7 @@ EMERGENCIA_CARDIACA = [
     "siento un pinchazo en el corazón", "me duele el corazón", "estoy sin aliento y mareado",
     "me duele el esternón",
     "siento como un elefante en el pecho", "no me entra el aire", "respiro mal",
-    "me falta el aliento", "tengo palpitaciones", "el corazón me va a mil",
+    "me falta el aliento", "tengo palpitaciones",
     "me falta la respiración", "tengo el pecho cargado y me cuesta coger aire",
     "no puedo coger aire", "tengo taquicardia", "siento tirantez en el pecho", "me asfixio",
     "siento que me desmayo", "tengo un nudo en el pecho", "noto el pecho apretado",
@@ -1505,7 +1506,7 @@ PECHO_SIN_URGENCIA = [
 async def test_senal_cardiaca_por_la_api_usa_la_plantilla_de_urgencia(settings, repo, usuario, mensaje):
     respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
     assert motivo == "dolor_pecho"
-    assert "112" in respuesta and "atención médica inmediata" in respuesta
+    assert "112" in respuesta and "atención médica urgente" in respuesta
 
 
 @pytest.mark.parametrize("mensaje", [*PECHO_SIN_URGENCIA, *SONDA_SIN_DOLOR,
@@ -1550,3 +1551,221 @@ async def test_llm_con_zona_corazon_y_cita_valida_usa_la_plantilla_de_urgencia(
         dolor_agudo=True, cita_dolor="algo extraño por dentro", zona_dolor="corazón"))
     assert motivo == "dolor_pecho"
     assert "112" in respuesta
+
+
+# --- Regla K: triaje de urgencia cardiaca en tres niveles -------------------------------------
+# Nivel 1: 112 determinista (sintoma inequivoco, sin LLM). Nivel 2: 112 por el LLM
+# (sintoma_cardiaco + cita verificada). Nivel 3: terminos ambiguos de entrenamiento, nunca 112
+# por si solos; pausa generica solo con senal de dolor.
+
+# Todas las urgencias de las re-revisiones 1-4 (y de la regla K) que cubre el nivel 1.
+URGENCIA_NIVEL_1 = [
+    # re-revision 1
+    "me cuesta respirar y me aprieta el pecho",
+    # re-revision 2
+    "siento presión en el pecho", "se me oprime el pecho al correr", "me ahogo al hacer burpees",
+    "brazo dormido y me cuesta respirar",
+    # re-revision 3 (todas salvo "el corazón me va a mil", que es nivel 2)
+    *EMERGENCIA_CARDIACA,
+    # re-revision 4: las que ya daban 112
+    "me duele el pecho y se me va al brazo izquierdo", "tengo un hormigueo en el brazo izquierdo",
+    "el corazón me late a saltos, irregular", "siento que me falta aire incluso en reposo",
+    "me duele la espalda entre los omóplatos y el pecho",
+    # re-revision 4: las 17 que no pausaban (salvo "se me nubla la vista...", nivel 2)
+    "siento una presión fuerte en el pecho que no se va", "tengo el pecho pesado",
+    "noto pesadez en el pecho", "me cuesta mucho respirar y estoy sudando frío",
+    "me cuesta mucho respirar", "me falta mucho el aire", "respiro con dificultad",
+    "me he quedado sin respiración", "noto el corazón desbocado",
+    "el corazón se me sale del pecho", "se me para el corazón por momentos",
+    "he perdido el conocimiento un momento", "casi me desvanezco en la cinta",
+    "sudor frío y náuseas", "siento ahogo", "jadeo y no recupero el aliento",
+    "estoy hiperventilando", "tengo un ataque de asma",
+    # regla K: intensificadores entre palabras, desmayo, sudor frio, dolor en las series
+    "presión muy fuerte en el pecho", "dolor intenso en el pecho",
+    "me duele el pecho en las series", "perdí el conocimiento", "me desmayo", "tengo sudor frío",
+]
+
+# Urgencias que el lexico no cubre de forma inequivoca: 112 solo por el LLM (nivel 2). Las tres
+# ultimas pausan igualmente (generica) por el lexico de dolor aunque el LLM no las marque.
+URGENCIA_NIVEL_2 = [
+    "el corazón me va a mil",  # re-revision 3; ambiguo con "va a mil en el HIIT"
+    "se me nubla la vista y creo que me voy a caer",  # re-revision 4
+    "me he mareado mucho y veo puntos negros",  # re-revision 4
+    "tengo dolor en el cuello y la mandíbula al subir escaleras",  # re-revision 4
+]
+
+# Frases de gimnasio de las re-revisiones 1-4 sin senal de sintoma: ni 112 ni pausa.
+GIMNASIO_SIN_PAUSA = [
+    # re-revision 4: las 8 que daban 112 falso (y una relacionada)
+    "el corazón me late rápido después del HIIT, ¿es normal?",
+    "¿a cuánto late el corazón en cardio?", "mi corazón late a 60 en reposo",
+    "en el HIIT el corazón va a mil, ¿cuánto descanso?",
+    "mi reloj dice que tengo el corazón acelerado en las series",
+    "me quedo sin aliento subiendo escaleras, quiero mejorar mi fondo",
+    "tengo el pecho cargado de agujetas tras el press",
+    "no puedo respirar bien en la sentadilla, ¿cómo mejoro la técnica?",
+    "cuántas veces late el corazón",
+    # re-revision 4: las 25 limpias
+    "¿en qué zona 2 de frecuencia cardíaca debo entrenar?", "mi pulso en reposo es 60",
+    "¿a cuánto me tiene que latir el corazón?", "¿cómo respiro en la sentadilla?",
+    "exhalo al subir la barra", "me falta resistencia aeróbica", "hoy es día de pecho",
+    "quiero sacar pecho", "¿cuántas pulsaciones para quemar grasa?",
+    "quiero mejorar mi capacidad pulmonar", "el cardio es bueno para el corazón",
+    "inhalo en el press", "¿cojo aire antes del peso muerto?", "respiración diafragmática",
+    "quiero un corazón sano", "el pulsómetro marca 150", "¿la maniobra de Valsalva es segura?",
+    "quiero ensanchar el torso", "ejercicios para pectorales", "trabajar el pectoral superior",
+    "mi FC máxima es 220 menos la edad", "¿cómo controlo la respiración al correr?",
+    "ejercicios para costillas y oblicuos", "rutina de cardio para el corazón",
+    "quiero entrenar pecho y corazón con circuitos",
+    "me gusta sentir el corazón latir fuerte en los sprints",
+    # regla K
+    "pecho cargado de agujetas",
+    # re-revision 3: pecho sin sintoma (incluye las 7 que daban 112) y respiracion de tecnica
+    *PECHO_SIN_URGENCIA,
+    "no puedo respirar bien en la sentadilla, me cuesta la técnica de respirar?",
+    "el press de pecho se me hace pesado", "tengo que subir peso en el pecho",
+    # re-revision 2
+    "el pecho me ha crecido", "quiero mejorar mi respiración", "press de pecho",
+    "me falla la técnica en la sentadilla", "me encanta el press",
+    # re-revision 1
+    "tengo agujetas",
+]
+
+# Pausas genericas documentadas y aceptadas (fallo seguro): nunca 112.
+GIMNASIO_PAUSA_GENERICA = [
+    "me mareo un poco si no desayuno antes de entrenar",  # re-revision 4
+    "me encanta el ardor del pump",  # re-revision 2
+    "me rompí la cabeza pensando en la dieta",  # re-revision 2
+    "hago flexiones de pecho en casa y me arden los brazos",  # re-revision 2
+]
+
+# Termino ambiguo (nivel 3) + senal de dolor: pausa generica, no 112.
+AMBIGUO_CON_DOLOR = [
+    "el corazón me late rápido en el HIIT y me mareo",
+    "tengo el pecho cargado de agujetas y me molesta el hombro",
+    "me quedo sin aliento en las series y noto un pinchazo en la rodilla",
+]
+
+
+def _analisis_cardiaco(cita):
+    return AnalisisMensaje(sintoma_cardiaco=True, cita_sintoma=cita)
+
+
+@pytest.mark.parametrize("mensaje", URGENCIA_NIVEL_1)
+async def test_nivel_1_urgencia_112_sin_llm(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert detectar_dolor_pecho(mensaje)
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta and "atención médica urgente" in respuesta
+
+
+@pytest.mark.parametrize("mensaje", URGENCIA_NIVEL_2)
+async def test_nivel_2_urgencia_112_por_el_llm_con_cita(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert not detectar_dolor_pecho(mensaje)  # no es nivel 1: depende de la red del LLM
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje,
+                                          _analisis_cardiaco(mensaje))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+@pytest.mark.parametrize("mensaje", URGENCIA_NIVEL_2[1:])
+def test_nivel_2_sin_llm_al_menos_pausa_generica(mensaje):
+    assert detectar_dolor_agudo(mensaje)
+
+
+@pytest.mark.parametrize("mensaje", GIMNASIO_SIN_PAUSA)
+async def test_gimnasio_sin_sintoma_no_pausa_ni_112(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert not detectar_dolor_pecho(mensaje)
+    assert not detectar_dolor_agudo(mensaje)
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="sintesis")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": mensaje}, config_hilo(usuario))
+    assert "__interrupt__" not in salida
+
+
+@pytest.mark.parametrize("mensaje", GIMNASIO_PAUSA_GENERICA)
+async def test_pausas_genericas_aceptadas_no_son_112(settings, repo, usuario, mensaje):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_agudo"
+    assert "112" not in respuesta
+
+
+@pytest.mark.parametrize("mensaje", GIMNASIO_SIN_PAUSA[:9])
+def test_frases_de_frecuencia_y_respiracion_son_terminos_ambiguos(mensaje):
+    from app.agentes.nodos import termino_cardiaco_ambiguo
+
+    assert termino_cardiaco_ambiguo(mensaje)
+
+
+@pytest.mark.parametrize("mensaje", AMBIGUO_CON_DOLOR)
+async def test_termino_ambiguo_con_senal_de_dolor_pausa_generica(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import termino_cardiaco_ambiguo
+
+    assert termino_cardiaco_ambiguo(mensaje)
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_agudo"
+    assert "112" not in respuesta
+
+
+@pytest.mark.parametrize("mensaje,cita", [
+    ("el corazón me late rápido después del HIIT, ¿es normal?", "me late rápido después del HIIT"),
+    ("mi reloj dice que tengo el corazón acelerado en las series", "el corazón acelerado"),
+    ("me quedo sin aliento subiendo escaleras, quiero mejorar mi fondo", "sin aliento subiendo escaleras"),
+])
+async def test_termino_ambiguo_con_sintoma_del_llm_y_cita_valida_es_112(
+    settings, repo, usuario, mensaje, cita
+):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, _analisis_cardiaco(cita))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+@pytest.mark.parametrize("cita", [None, "", "corazón", "me duele el pecho", "late fuerte y raro"])
+async def test_sintoma_cardiaco_del_llm_con_cita_invalida_se_ignora(settings, repo, usuario, cita):
+    mensaje = "¿a cuánto late el corazón en cardio?"
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [_analisis_cardiaco(cita)],
+        "DecisionSupervisor": [DecisionSupervisor(destino="sintesis")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": mensaje}, config_hilo(usuario))
+    assert "__interrupt__" not in salida
+    assert salida["requiere_humano"] is False
+
+
+async def test_sintoma_cardiaco_gana_al_dolor_generico(settings, repo, usuario):
+    # dolor no toracico por lexico + sintoma cardiaco del LLM con cita -> 112
+    respuesta, motivo = await _chat_pausa(
+        settings, repo, usuario, "me duele el cuello y noto algo raro por dentro",
+        _analisis_cardiaco("algo raro por dentro"))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta
+
+
+def test_plantilla_112_no_afirma_lo_que_dijo_el_usuario():
+    from app.agentes.nodos import texto_pausa, texto_tras_revision
+
+    for texto in (texto_pausa("dolor_pecho"), texto_tras_revision("dolor_pecho", " con press banca")):
+        bajo = texto.lower()
+        assert "reportaste" not in bajo
+        assert "lo que describes puede ser un síntoma que requiere atención médica urgente" in bajo
+        assert "llama al 112 ahora" in bajo
+        assert AVISO_MEDICO.lower() in bajo
+
+
+def test_el_prompt_del_evaluador_explica_sintoma_frente_a_entrenamiento():
+    from app.agentes.nodos import Nodos
+
+    nodos = Nodos(RepoFalso(), CATALOGO, LLMFalso(), _buscador_falso)
+    sistema = nodos._prompt_evaluador({"mensaje": "hola", "mensajes": []}, None)[0].content
+    assert "sintoma_cardiaco" in sistema and "cita_sintoma" in sistema
+    assert "frecuencia cardiaca" in sistema and "agujetas" in sistema
