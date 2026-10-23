@@ -287,6 +287,14 @@ contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_AP
   hombro lesionado quedan bloqueados 612 de 876 ejercicios. Falta una revisión humana de falsos
   negativos y bloqueos excesivos en
   [docs/revision/bloqueos-por-zona.md](docs/revision/bloqueos-por-zona.md).
+- **Detección de dolor agudo y síntomas cardiacos limitada.** Se basa en un léxico determinista
+  en español (raíces y frases sobre el mensaje actual) y, como segunda red, en el LLM, cuya
+  señal solo cuenta si cita literalmente el mensaje actual. No reconoce todas las formas de
+  describir un síntoma. El coach no es un dispositivo médico ni sustituye una valoración
+  profesional. Ante síntomas de pecho o cardiacos (dolor u opresión en el pecho, falta de aire,
+  palpitaciones, brazo izquierdo dormido o sensación de desmayo) la conversación se pausa y responde
+  con un mensaje fijo que indica llamar al 112 o acudir a urgencias. Los falsos positivos
+  (pausas de más ante frases inocuas) son deliberados.
 - **Dos citas de las guías marcadas «(verificar referencia)»:** la de la NSCA en
   [data/guias/tecnica_basica.md](data/guias/tecnica_basica.md) y la del ACSM en
   [data/guias/consideraciones_por_zona_lesion.md](data/guias/consideraciones_por_zona_lesion.md).

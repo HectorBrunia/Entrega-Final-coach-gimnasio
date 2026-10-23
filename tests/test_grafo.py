@@ -1464,3 +1464,89 @@ async def test_sobre_escalado_aceptado_flexiones_de_pecho_con_ardor_en_los_brazo
         settings, repo, usuario, "hago flexiones de pecho en casa y me arden los brazos",
         AnalisisMensaje())
     assert motivo == "dolor_pecho"
+
+
+# --- Re-revision 3: senales cardiacas y contexto de gimnasio con "pecho" ---------------------
+
+# Las 30 frases de urgencia de fix-dolor-rutina-rereview-3.md (seccion 2).
+EMERGENCIA_CARDIACA = [
+    "me late muy rápido el corazón y me duele el pecho", "me aprieta aquí en el pecho",
+    "me quema el pecho", "me cuesta respirar al hacer sentadillas", "me oprime el pecho",
+    "me arde el pecho al correr",
+    "se me duerme el brazo izquierdo", "me duele el brazo izquierdo",
+    "me duele la mandíbula y el brazo izquierdo", "noto una opresión rara",
+    "siento un pinchazo en el corazón", "me duele el corazón", "estoy sin aliento y mareado",
+    "me duele el esternón",
+    "siento como un elefante en el pecho", "no me entra el aire", "respiro mal",
+    "me falta el aliento", "tengo palpitaciones", "el corazón me va a mil",
+    "me falta la respiración", "tengo el pecho cargado y me cuesta coger aire",
+    "no puedo coger aire", "tengo taquicardia", "siento tirantez en el pecho", "me asfixio",
+    "siento que me desmayo", "tengo un nudo en el pecho", "noto el pecho apretado",
+    "no respiro bien",
+]
+
+# Las frases de la re-revision 3 que mencionan pecho sin sintoma (12 sin falso positivo y 7 que
+# lo daban): no deben pausar.
+PECHO_SIN_URGENCIA = [
+    "quiero sacar más pecho", "rutina de pecho y tríceps", "press de pecho inclinado",
+    "el día de pecho me encanta", "¿cuántas series de pecho hago?",
+    "aperturas de pecho con mancuernas", "hago fondos para el pecho",
+    "agarre apretado en el press de pecho", "pecho y espalda el lunes",
+    "¿qué ejercicios de tórax recomiendas?", "fondos de pecho con lastre",
+    "como respiro en press de pecho",
+    "más peso en el press de pecho", "subí el peso en el pecho",
+    "quiero ganar peso en press de pecho", "cuanto peso en press de pecho deberia mover",
+    "pongo 60 kg de peso en el pecho", "subir peso en pecho cada semana",
+    "rutina de pecho con aperturas presionando",
+]
+
+
+@pytest.mark.parametrize("mensaje", EMERGENCIA_CARDIACA)
+async def test_senal_cardiaca_por_la_api_usa_la_plantilla_de_urgencia(settings, repo, usuario, mensaje):
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje())
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta and "atención médica inmediata" in respuesta
+
+
+@pytest.mark.parametrize("mensaje", [*PECHO_SIN_URGENCIA, *SONDA_SIN_DOLOR,
+                                     "me falla la técnica en la sentadilla",
+                                     "quiero mejorar mi respiración", "el pecho me ha crecido",
+                                     "press de pecho", "me encanta el press"])
+async def test_contexto_de_gimnasio_no_pausa(settings, repo, usuario, mensaje):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert not detectar_dolor_pecho(mensaje)
+    assert not detectar_dolor_agudo(mensaje)
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="sintesis")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": mensaje}, config_hilo(usuario))
+    assert "__interrupt__" not in salida
+
+
+@pytest.mark.parametrize("zona", ["pecho", "tórax", "corazón", "esternón", "costillas", "torso",
+                                  "brazo izquierdo"])
+def test_zonas_toracicas_del_llm(zona):
+    from app.agentes.nodos import es_zona_pecho
+
+    assert es_zona_pecho(zona)
+
+
+@pytest.mark.parametrize("zona", ["hombro", "rodilla", "brazo derecho", "espalda"])
+def test_zonas_no_toracicas_del_llm(zona):
+    from app.agentes.nodos import es_zona_pecho
+
+    assert not es_zona_pecho(zona)
+
+
+async def test_llm_con_zona_corazon_y_cita_valida_usa_la_plantilla_de_urgencia(
+    settings, repo, usuario
+):
+    mensaje = "Noto algo extraño por dentro cuando corro"
+    assert not detectar_dolor_agudo(mensaje)
+    respuesta, motivo = await _chat_pausa(settings, repo, usuario, mensaje, AnalisisMensaje(
+        dolor_agudo=True, cita_dolor="algo extraño por dentro", zona_dolor="corazón"))
+    assert motivo == "dolor_pecho"
+    assert "112" in respuesta

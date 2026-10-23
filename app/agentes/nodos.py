@@ -55,30 +55,64 @@ AVISO_MEDICO = "Esto no es un diagnóstico médico."
 # coincidencia en el mensaje ACTUAL basta para pausar a revision humana, diga lo que diga el
 # LLM. Criterio amplio a proposito: ante la duda, escalar. Reportar una lesion ("me lesione
 # ...") NO es senal de dolor agudo: va por la ruta de lesiones (registro + bloqueo por zona).
-# Urgencia toracica (motivo dolor_pecho: plantilla fija con 112 y atencion medica inmediata).
-# 1) Dificultad para respirar, por si sola:
-PATRONES_RESPIRACION: tuple[str, ...] = (
-    r"\bme ahog\w*",                          # me ahogo, me ahogaba
+# Urgencia toracica/cardiaca (motivo dolor_pecho: plantilla fija con 112 y atencion medica
+# inmediata). Determinista, sobre el mensaje actual normalizado (sin tildes ni mayusculas).
+# 1) Senales que por si solas son urgencia (respiracion, cardiacas, presincope):
+PATRONES_URGENCIA: tuple[str, ...] = (
+    r"\bme ahog\w*",                          # me ahogo
     r"\bno puedo respirar\b",                 # no puedo respirar (bien)
     r"\bme cuesta respirar\b",                # me cuesta respirar
     r"\bme falta el aire\b",                  # me falta el aire
     r"\bfalta (?:de )?aire\b",                # falta de aire
+    r"\bno me entra (?:el )?aire\b",          # no me entra el aire
+    r"\b(?:me falta|sin) (?:el )?aliento\b",  # me falta el aliento, sin aliento
+    r"\bme falta la respiracion\b",           # me falta la respiracion
+    r"\brespiro mal\b|\bno respiro bien\b",   # respiro mal, no respiro bien
+    r"\b(?:no puedo|me cuesta) coger aire\b", # no puedo coger aire
+    r"\basfixi\w*",                           # me asfixio
+    r"\bpalpitacion\w*",                      # palpitaciones
+    r"\btaquicardi\w*",                       # taquicardia
+    r"\bdesmay\w*",                           # me desmayo, me voy a desmayar
+    r"\bopresi\w*",                           # opresion (casi siempre toracica)
+    r"\belefante en el pecho\b",              # como un elefante en el pecho
 )
-_PATRONES_RESPIRACION = tuple(re.compile(p) for p in PATRONES_RESPIRACION)
-# 2) Zona toracica mencionada junto con cualquiera de estas senales (en el mismo mensaje):
-_ZONA_PECHO = re.compile(r"\b(?:pecho|torax|toracic\w*)\b")
+_PATRONES_URGENCIA = tuple(re.compile(p) for p in PATRONES_URGENCIA)
+
+# 2) Zona toracica (tambien la usa es_zona_pecho para la zona que reporta el LLM).
+_ZONA_PECHO = re.compile(
+    r"\b(?:pecho|torax|toracic\w*|coraz\w*|estern\w*|costill\w*|torso|pectoral\w*)\b"
+)
+# Senales que, junto con la zona toracica en el mismo mensaje, son urgencia. Son sintomas, no
+# contexto de entrenamiento: "peso en el press de pecho" o "agarre apretado" no cuentan.
 PATRONES_SENAL_PECHO: tuple[str, ...] = (
     r"\bdol(?:or|i|e)\w*|\bduel(?:e|en)\b",   # dolor, me duele
-    r"\bpresi\w*",                            # presion en el pecho
-    r"\bopresi\w*",                           # opresion
+    r"\bpresion (?:en|sobre) el (?:pecho|torax)\b",   # presion en el pecho
+    r"\bme presiona\w* el (?:pecho|torax)\b",         # me presiona el pecho
+    r"\b(?:siento|noto|tengo) (?:un |mucho )?peso en el (?:pecho|torax)\b",  # siento peso en el pecho
     r"\boprim\w*",                            # se me oprime
-    r"\bapriet\w*|\baprieta\w*",              # me aprieta, apretado
+    r"\b(?:me )?aprieta\w*",                  # me aprieta (aqui en el pecho)
+    r"\b(?:pecho|torax) (?:muy |tan )?(?:apretado|oprimido|cargado)\b",  # pecho apretado
+    r"\b(?:apretado|oprimido|cargado) el (?:pecho|torax)\b",
+    r"\bnudo en el (?:pecho|torax)\b",        # nudo en el pecho
+    r"\btirantez\b",                          # tirantez en el pecho
     r"\bard(?:e|en|er|or|ia|io|iendo|ido|ida)\w*",  # arde, ardor
-    r"\bpinch\w*",                            # pincha, pinchazo
+    r"\bquema(?:n|ba)?\b|\bquemazon\b",       # me quema el pecho (no "quemar grasa")
+    r"\bpinch\w*",                            # pinchazo
     r"\bpunz\w*",                             # punzada
-    r"\bpeso en\b",                           # peso en el pecho
 )
 _PATRONES_SENAL_PECHO = tuple(re.compile(p) for p in PATRONES_SENAL_PECHO)
+# Corazon con ritmo anormal o sensacion rara.
+_CORAZON = re.compile(r"\bcoraz\w*")
+PATRONES_SENAL_CORAZON: tuple[str, ...] = (
+    r"\bva a mil\b",                          # el corazon me va a mil
+    r"\bacelerad\w*",                         # acelerado
+    r"\blat(?:e|en|ia|iendo)\b",              # late muy rapido / fuerte
+    r"\braro\b|\bextrano\b",                  # el corazon raro
+)
+_PATRONES_SENAL_CORAZON = tuple(re.compile(p) for p in PATRONES_SENAL_CORAZON)
+# Brazo izquierdo dormido, con hormigueo o dolor.
+_BRAZO_IZQUIERDO = re.compile(r"\bbrazo izquierdo\b")
+_SENAL_BRAZO = re.compile(r"\bdorm\w*|\bduerm\w*|\badormec\w*|\bentumec\w*|\bhormigue\w*")
 
 PATRONES_DOLOR: tuple[str, ...] = (
     r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler (no "dolar")
@@ -208,11 +242,19 @@ def _senal_lexico(texto_norm: str) -> bool:
 
 
 def detectar_dolor_pecho(mensaje: str) -> bool:
-    """Urgencia toracica: dificultad para respirar, o pecho/torax junto con una senal de dolor,
-    presion u opresion (o cualquier senal del lexico) en el mismo mensaje. Fallo seguro: el
-    dolor puede estar en otra zona del mensaje ("flexiones de pecho... me arden los brazos")."""
+    """Urgencia toracica o cardiaca en el mensaje actual. True si hay:
+    - una senal de urgencia por si sola (falta de aire, palpitaciones, desmayo, opresion...);
+    - brazo izquierdo dormido, con hormigueo o dolor;
+    - corazon con ritmo anormal o sensacion rara, o con cualquier senal de dolor;
+    - zona toracica junto con un sintoma toracico o cualquier senal del lexico de dolor.
+    Fallo seguro aceptado: el dolor puede estar en otra zona del mismo mensaje ("flexiones de
+    pecho... me arden los brazos"). Contexto de entrenamiento sin sintoma no cuenta."""
     texto = _normalizar(mensaje)
-    if any(p.search(texto) for p in _PATRONES_RESPIRACION):
+    if any(p.search(texto) for p in _PATRONES_URGENCIA):
+        return True
+    if _BRAZO_IZQUIERDO.search(texto) and (_SENAL_BRAZO.search(texto) or _senal_lexico(texto)):
+        return True
+    if _CORAZON.search(texto) and any(p.search(texto) for p in _PATRONES_SENAL_CORAZON):
         return True
     if not _ZONA_PECHO.search(texto):
         return False
@@ -226,7 +268,11 @@ def detectar_dolor_agudo(mensaje: str) -> bool:
 
 
 def es_zona_pecho(zona: str | None) -> bool:
-    return bool(zona) and _ZONA_PECHO.search(_normalizar(zona)) is not None
+    """Zona del dolor que reporta el LLM: toracica/cardiaca (o brazo izquierdo)."""
+    if not zona:
+        return False
+    texto = _normalizar(zona)
+    return bool(_ZONA_PECHO.search(texto) or _BRAZO_IZQUIERDO.search(texto))
 
 
 CITA_MIN_PALABRAS = 2
