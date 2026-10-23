@@ -87,3 +87,23 @@ class EntrenoTabla(Base):
     peso_kg: Mapped[float] = mapped_column(Float, nullable=False)
     rpe: Mapped[int] = mapped_column(Integer, nullable=False)
     notas: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ExclusionDolorTabla(Base):
+    """Ejercicio excluido por dolor agudo: dato de dominio (como las lesiones), no del hilo."""
+
+    __tablename__ = "exclusiones_dolor"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "ejercicio_id", name="uq_exclusiones_dolor_usuario_ejercicio"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ejercicio_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    activa: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    creada_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

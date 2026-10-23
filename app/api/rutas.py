@@ -203,7 +203,9 @@ async def rutina_actual(request: Request, usuario_id: UUID) -> RutinaSalida:
     indice = await asyncio.to_thread(indice_bloqueo, catalogo)  # cacheado por catalogo
     lesiones = await repo.lesiones_activas(usuario_id)
     valores = getattr(estado, "values", None) or {}
-    prohibidos = ids_bloqueados(lesiones, indice, solo_conocidas=True) | set(
+    # exclusiones por dolor: dato de dominio (Postgres); la lista del hilo es solo cache
+    excluidos = set(await repo.exclusiones_activas(usuario_id))
+    prohibidos = ids_bloqueados(lesiones, indice, solo_conocidas=True) | excluidos | set(
         valores.get("ejercicios_excluidos") or []
     )
     if any(p.ejercicio_id in prohibidos for d in rutina.dias for p in d.ejercicios):

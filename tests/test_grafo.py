@@ -82,6 +82,7 @@ class LLMFalso(BaseChatModel):
     estructuradas: dict[str, list] = Field(default_factory=dict)
     textos: list[str] = Field(default_factory=list)
     llamadas: list[str] = Field(default_factory=list)
+    entradas: list = Field(default_factory=list)  # (esquema, mensajes) de cada salida estructurada
 
     @property
     def _llm_type(self) -> str:
@@ -95,6 +96,7 @@ class LLMFalso(BaseChatModel):
     def with_structured_output(self, schema, **kwargs):
         def _salida(entrada):
             self.llamadas.append(schema.__name__)
+            self.entradas.append((schema.__name__, entrada))
             cola = self.estructuradas.get(schema.__name__, [])
             if not cola:
                 return None
@@ -115,6 +117,7 @@ class RepoFalso:
         self.lesiones: dict[UUID, list[Lesion]] = {}
         self.rutinas: dict[UUID, list[Rutina]] = {}
         self.entrenos: dict[UUID, list[EntrenoRegistro]] = {}
+        self.exclusiones: dict[UUID, list[str]] = {}
 
     async def guardar_perfil(self, perfil):
         self.perfiles[perfil.usuario_id] = perfil
@@ -127,6 +130,14 @@ class RepoFalso:
 
     async def lesiones_activas(self, usuario_id):
         return [l for l in self.lesiones.get(usuario_id, []) if l.activa]
+
+    async def agregar_exclusion(self, usuario_id, ejercicio_id):
+        actuales = self.exclusiones.setdefault(usuario_id, [])
+        if ejercicio_id not in actuales:
+            actuales.append(ejercicio_id)
+
+    async def exclusiones_activas(self, usuario_id):
+        return list(self.exclusiones.get(usuario_id, []))
 
     async def actualizar_severidad_lesion(self, usuario_id, zona, severidad):
         self.lesiones[usuario_id] = [
@@ -1272,3 +1283,79 @@ def test_cita_de_dos_palabras_y_ocho_caracteres_cuenta():
     assert cita_en_mensaje("algo raro", "Noto algo raro en el hombro")
     assert cita_en_mensaje("Algo RARO.", "noto algo raro en el hombro")
     assert not cita_en_mensaje("algo raro", "noto algo extraño en el hombro")
+
+
+# --- N2: las exclusiones por dolor son datos de dominio (repositorio), no del hilo -----------
+
+async def test_el_dolor_persiste_la_exclusion_antes_de_la_pausa(settings, repo, usuario):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"},
+                                 config_hilo(usuario))
+    assert "__interrupt__" in salida
+    assert await repo.exclusiones_activas(usuario) == ["press_banca"]
+
+
+async def test_tras_reiniciar_el_hilo_el_programador_no_ofrece_el_ejercicio_excluido(
+    settings, repo, usuario
+):
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje()],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [_plan("press_banca", "sentadilla"), _plan("sentadilla", "remo_con_barra")],
+    })
+    saver = _saver()
+    grafo = await _grafo(settings, repo, llm, saver)
+    cfg = config_hilo(usuario)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"}, cfg)
+    await saver.adelete_thread(str(usuario))  # reinicio del hilo (regla E): sin checkpoint
+    assert not (await grafo.aget_state(cfg)).values
+
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "Dame una rutina nueva"}, cfg)
+    assert "__interrupt__" not in salida
+    assert "press_banca" in salida["ejercicios_excluidos"]
+    assert "press_banca" not in _ids_rutina(await repo.rutina_actual(usuario))
+    prompts = [e for nombre, e in llm.entradas if nombre == "PlanPropuesto"]
+    assert prompts
+    for mensajes in prompts:
+        lista = mensajes[0].content.split("Usa SOLO ejercicio_id de esta lista:")[1].split("En 'fuentes'")[0]
+        assert "press_banca" not in lista
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla", "remo_con_barra"}
+
+
+async def test_seguridad_bloquea_el_excluido_del_repositorio_aunque_el_hilo_no_lo_tenga(
+    repo, usuario
+):
+    from app.agentes.nodos import Nodos
+
+    await repo.agregar_exclusion(usuario, "press_banca")
+    nodos = Nodos(repo, CATALOGO, LLMFalso(), _buscador_falso)
+    salida = await nodos.seguridad({
+        "usuario_id": usuario, "rutina": Rutina(usuario_id=usuario, version=1,
+                                                 dias=_dias("press_banca", "sentadilla")),
+        "rutina_nueva": True, "lesiones": [], "ejercicios_excluidos": [],
+    })
+    assert salida["bloqueados"] == ["press_banca"]
+    assert salida["plan_validado"] is False
+
+
+async def test_get_rutina_409_tras_reiniciar_el_hilo_si_la_rutina_guardada_tiene_el_excluido(
+    settings, repo, usuario
+):
+    # la rutina solo tiene el ejercicio con dolor: depurarla la dejaria vacia y no se guarda
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1, dias=_dias("press_banca")))
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    saver = _saver()
+    grafo = await _grafo(settings, repo, llm, saver)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"},
+                        config_hilo(usuario))
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"press_banca"}
+    await saver.adelete_thread(str(usuario))  # se pierde la pausa y la lista del checkpoint
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.get(f"/usuarios/{usuario}/rutinas/actual")
+    assert r.status_code == 409, r.text
+    assert "ya no es segura" in r.json()["detail"]

@@ -35,6 +35,7 @@ class RepoFalso:
         self.perfiles: dict[UUID, Perfil] = {}
         self.rutinas: dict[UUID, Rutina] = {}
         self.lesiones: dict[UUID, list[Lesion]] = {}
+        self.exclusiones: dict[UUID, list[str]] = {}
         self.llamadas = 0
 
     async def crear_usuario(self) -> UUID:
@@ -52,6 +53,10 @@ class RepoFalso:
     async def lesiones_activas(self, usuario_id):
         self.llamadas += 1
         return [l for l in self.lesiones.get(usuario_id, []) if l.activa]
+
+    async def exclusiones_activas(self, usuario_id):
+        self.llamadas += 1
+        return list(self.exclusiones.get(usuario_id, []))
 
     async def registrar_entreno(self, entreno):
         self.llamadas += 1

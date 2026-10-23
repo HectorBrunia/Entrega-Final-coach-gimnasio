@@ -335,6 +335,12 @@ class Nodos:
         await self.repo.guardar_rutina(depurada)
         return await self.repo.rutina_actual(uid)
 
+    async def _excluidos(self, estado: EstadoCoach) -> list[str]:
+        """Ejercicios excluidos por dolor. Fuente de verdad: el repositorio (Postgres); la lista
+        del checkpoint es solo una cache del turno y se une por si acaso."""
+        persistidos = await self.repo.exclusiones_activas(estado["usuario_id"])
+        return list(dict.fromkeys([*persistidos, *(estado.get("ejercicios_excluidos") or [])]))
+
     @staticmethod
     def _historial(estado: EstadoCoach) -> list[BaseMessage]:
         return list(estado.get("mensajes") or [])[-HISTORIAL_PROMPT:]
@@ -378,10 +384,16 @@ class Nodos:
             else:
                 rutina = depurada
 
-        excluidos = list(estado.get("ejercicios_excluidos") or [])
+        persistidos = await self.repo.exclusiones_activas(uid)
+        excluidos = list(dict.fromkeys([*persistidos, *(estado.get("ejercicios_excluidos") or [])]))
+        for heredado in (e for e in excluidos if e not in persistidos):
+            # exclusion que solo vivia en un checkpoint anterior: pasa a ser dato de dominio
+            await self.repo.agregar_exclusion(uid, heredado)
         dolor, ejercicio = self._dolor_del_mensaje(mensaje, analisis, dolor_por_palabra)
         if dolor:
             if ejercicio in self.catalogo:
+                # dato de dominio: sobrevive a un reinicio del hilo (regla E)
+                await self.repo.agregar_exclusion(uid, ejercicio)
                 if ejercicio not in excluidos:
                     excluidos.append(ejercicio)
                 # Se retira ya de la rutina persistida (antes de la pausa HITL), para que no
@@ -575,7 +587,7 @@ class Nodos:
         if perfil is None:
             return {**base, "rutina": None, "fallo_plan": True}
 
-        excluidos = set(estado.get("ejercicios_excluidos") or []) | set(previos)
+        excluidos = set(await self._excluidos(estado)) | set(previos)
         try:
             permitidos = filtrar_por_lesiones(
                 list(self.catalogo.values()), estado.get("lesiones") or [], self.indice
@@ -657,7 +669,7 @@ class Nodos:
         if rutina is None:
             return {"bloqueados": [], "plan_validado": False}
         lesiones = estado.get("lesiones") or []
-        excluidos = estado.get("ejercicios_excluidos") or []
+        excluidos = await self._excluidos(estado)
         try:
             bloqueados = await self._bloqueados(rutina, lesiones, excluidos)
         except ZonaLesionDesconocida:
@@ -709,7 +721,7 @@ class Nodos:
         if rutina is not None:
             # defensa en profundidad: ademas de los excluidos por dolor, lo que bloquean las
             # lesiones activas con regla (idempotente; nunca deja una version vacia)
-            quitar = set(estado.get("ejercicios_excluidos") or []) | ids_bloqueados(
+            quitar = set(await self._excluidos(estado)) | ids_bloqueados(
                 estado.get("lesiones") or [], self.indice, solo_conocidas=True
             )
             rutina = await self._guardar_sin(uid, rutina, quitar) or rutina

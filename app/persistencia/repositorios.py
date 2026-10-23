@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.domain.modelos import DiaRutina, EntrenoRegistro, Lesion, Nivel, Perfil, Rutina
 from app.persistencia.tablas import (
-    EntrenoTabla, LesionTabla, PerfilTabla, RutinaTabla, UsuarioTabla,
+    EntrenoTabla, ExclusionDolorTabla, LesionTabla, PerfilTabla, RutinaTabla, UsuarioTabla,
 )
 
 
@@ -86,6 +86,27 @@ class RepositorioDominio:
                 .order_by(LesionTabla.registrada_en, LesionTabla.id)
             )
             return [Lesion(zona=f.zona, severidad=f.severidad, activa=f.activa) for f in res]
+
+    async def agregar_exclusion(self, usuario_id: UUID, ejercicio_id: str) -> None:
+        """Excluye un ejercicio por dolor agudo. Idempotente (reactiva si estaba inactiva)."""
+        async with self._sesion_factory() as s, s.begin():
+            await _asegurar_usuario(s, usuario_id)
+            stmt = pg_insert(ExclusionDolorTabla).values(
+                usuario_id=usuario_id, ejercicio_id=ejercicio_id, activa=True
+            )
+            await s.execute(stmt.on_conflict_do_update(
+                constraint="uq_exclusiones_dolor_usuario_ejercicio", set_={"activa": True}
+            ))
+
+    async def exclusiones_activas(self, usuario_id: UUID) -> list[str]:
+        async with self._sesion_factory() as s:
+            res = await s.scalars(
+                select(ExclusionDolorTabla.ejercicio_id)
+                .where(ExclusionDolorTabla.usuario_id == usuario_id,
+                       ExclusionDolorTabla.activa.is_(True))
+                .order_by(ExclusionDolorTabla.creada_en, ExclusionDolorTabla.id)
+            )
+            return list(res)
 
     async def guardar_rutina(self, rutina: Rutina) -> None:
         """Guarda una nueva version; la version la asigna el repositorio."""
