@@ -5,9 +5,10 @@ from uuid import UUID
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.modelos import DiaRutina, Lesion, Nivel, Perfil, Rutina
+from app.safety.reglas import REGLAS_LESION
 
 Destino = Literal["programador", "progreso", "seguridad", "sintesis", "hitl"]
 
@@ -47,13 +48,40 @@ class PerfilParcial(BaseModel):
     nivel: Nivel | None = None
 
 
+# Zonas que el evaluador puede reportar: las que tienen regla, dos genericas sin lado (se
+# expanden a ambos lados al guardar) y "otra" (texto libre; se guarda como zona sin regla y
+# por tanto escala a humano).
+ZONAS_GENERICAS: dict[str, tuple[str, ...]] = {
+    "hombro": ("hombro_derecho", "hombro_izquierdo"),
+    "rodilla": ("rodilla_derecha", "rodilla_izquierda"),
+}
+ZONA_OTRA = "otra"
+ZonaReportada = Literal[(*sorted(REGLAS_LESION), *ZONAS_GENERICAS, ZONA_OTRA)]  # type: ignore[valid-type]
+
+
+class LesionReportada(BaseModel):
+    """Lesion tal como la reporta el evaluador (zona acotada); se expande a `Lesion` al guardar."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    zona: ZonaReportada = Field(description=(
+        "Zona lesionada. Usa 'hombro' o 'rodilla' si no se indica el lado, y 'otra' (con "
+        "descripcion) para cualquier zona que no este en la lista."
+    ))
+    descripcion: str | None = Field(
+        default=None, description="Solo si zona es 'otra': la zona en pocas palabras (p. ej. cuello)."
+    )
+    severidad: Literal["leve", "moderada", "grave"]
+    activa: bool = True
+
+
 class AnalisisMensaje(BaseModel):
     """Salida estructurada del evaluador."""
 
     perfil: PerfilParcial | None = Field(
         default=None, description="Datos de perfil que el usuario menciona en este mensaje."
     )
-    lesiones_nuevas: list[Lesion] = Field(
+    lesiones_nuevas: list[LesionReportada] = Field(
         default_factory=list, description=(
             "Lesiones nuevas que el usuario reporta en el mensaje actual (no las del historial "
             "ni las ya registradas)."
@@ -68,6 +96,12 @@ class AnalisisMensaje(BaseModel):
     )
     ejercicio_con_dolor: str | None = Field(
         default=None, description="Id del ejercicio que le provoca dolor, si lo menciona en el mensaje actual."
+    )
+    cita_dolor: str | None = Field(
+        default=None, description=(
+            "Si dolor_agudo es true: fragmento copiado literalmente del mensaje actual donde el "
+            "usuario reporta el dolor. Vacio si el dolor no esta en el mensaje actual."
+        ),
     )
 
 

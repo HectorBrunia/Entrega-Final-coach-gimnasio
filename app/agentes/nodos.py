@@ -16,9 +16,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.types import interrupt
 
 from app.agentes.estado import (
+    ZONA_OTRA,
+    ZONAS_GENERICAS,
     AnalisisMensaje,
     DecisionSupervisor,
     EstadoCoach,
+    LesionReportada,
     PlanPropuesto,
 )
 from app.domain.equipo import EQUIPO_SIEMPRE_DISPONIBLE
@@ -48,17 +51,27 @@ Buscador = Callable[[str, FiltrosBusqueda], Awaitable[list[Documento]]]
 
 AVISO_MEDICO = "Esto no es un diagnóstico médico."
 
-# Frases que por si solas disparan la pausa HITL (comparacion sin mayusculas ni tildes).
-PALABRAS_DOLOR_AGUDO: tuple[str, ...] = (
-    "dolor agudo",
-    "dolor fuerte",
-    "dolor intenso",
-    "pinchazo",
-    "me duele mucho",
-    "dolor que empeora",
-    "empeora el dolor",
-    "duele cada vez mas",
+# Lexico de dolor (raices y frases, sobre texto normalizado: sin mayusculas ni tildes). Una
+# coincidencia en el mensaje ACTUAL basta para pausar a revision humana, diga lo que diga el
+# LLM. Criterio amplio a proposito: ante la duda, escalar.
+PATRONES_DOLOR: tuple[str, ...] = (
+    r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler
+    r"\bduel(?:e|en|a|an)\b",     # duele, duelen
+    r"\badolor\w*",               # adolorido
+    r"\bmolest\w*",               # molestia, me molesta
+    r"\btiron\w*",                # tiron, tirones
+    r"\bpinch\w*",                # pinchazo, pincha
+    r"\bard(?:e|en|er|or|ia|io|iendo|ido|ida)\w*",  # arde, ardor, ardiendo
+    r"\bpunz\w*",                 # punzada, punzante
+    r"\bcalambre\w*",
+    r"\blastim\w*",
+    r"\bhormigue\w*",
+    r"\bme lesion\w*",            # me lesione, me lesiono
+    r"\bme hice dano\b",
+    r"\bno puedo mover\w*",
+    r"\bse me (?:durmio|duerme|duermen|durmieron)\b",
 )
+_PATRONES_DOLOR = tuple(re.compile(p) for p in PATRONES_DOLOR)
 
 MAX_CANDIDATOS = 40
 HISTORIAL_PROMPT = 6
@@ -115,27 +128,32 @@ def _normalizar(texto: str) -> str:
     return " ".join(sin_tildes.lower().replace("_", " ").split())
 
 
-_PALABRAS_NORM = tuple(_normalizar(p) for p in PALABRAS_DOLOR_AGUDO)
-
-# Raices que indican que el mensaje habla de dolor o molestias (no necesariamente agudo).
-# Solo se usan para aceptar un dolor que el LLM marca sin ejercicio identificable: si el
-# mensaje actual no habla de dolor, ese dolor viene del historial y no se escala.
-_RAICES_DOLOR = ("dolor", "duele", "duelen", "dolio", "molest", "pinchazo", "punzada",
-                 "lastim", "lesion", "hormigue", "calambre")
-
-
 def detectar_dolor_agudo(mensaje: str) -> bool:
-    """Chequeo determinista: basta con una frase de la lista para escalar a humano."""
+    """Chequeo determinista: una senal del lexico de dolor en el mensaje basta para escalar."""
     texto = _normalizar(mensaje)
-    return any(p in texto for p in _PALABRAS_NORM)
+    return any(p.search(texto) for p in _PATRONES_DOLOR)
 
 
-def habla_de_dolor(mensaje: str) -> bool:
-    """El mensaje menciona dolor o molestias (criterio amplio, determinista)."""
-    texto = _normalizar(mensaje)
-    return detectar_dolor_agudo(mensaje) or any(
-        re.search(rf"\b{r}", texto) is not None for r in _RAICES_DOLOR
-    )
+def cita_en_mensaje(cita: str | None, mensaje: str) -> bool:
+    """La cita del LLM aparece literalmente (tras normalizar) en el mensaje actual."""
+    cita_norm = _normalizar(cita or "").strip(" .,;:!?\"'")
+    return len(cita_norm) >= 3 and cita_norm in _normalizar(mensaje)
+
+
+def _slug(texto: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", _normalizar(texto)).strip("_")
+
+
+def expandir_lesion(reportada: LesionReportada) -> list[Lesion]:
+    """Zona reportada -> lesiones a guardar. Sin lado -> ambos lados; "otra" -> zona sin regla
+    ("otra_<descripcion>"), que falla cerrado (HITL) como cualquier zona desconocida."""
+    datos = {"severidad": reportada.severidad, "activa": reportada.activa}
+    if reportada.zona in ZONAS_GENERICAS:
+        return [Lesion(zona=z, **datos) for z in ZONAS_GENERICAS[reportada.zona]]
+    if reportada.zona == ZONA_OTRA:
+        detalle = _slug(reportada.descripcion or "")
+        return [Lesion(zona=f"{ZONA_OTRA}_{detalle}" if detalle else ZONA_OTRA, **datos)]
+    return [Lesion(zona=reportada.zona, **datos)]
 
 
 def _contiene(texto_norm: str, frase_norm: str) -> bool:
@@ -274,18 +292,8 @@ class Nodos:
         analisis = analisis or AnalisisMensaje()
 
         perfil = await self._actualizar_perfil(uid, perfil, analisis)
-        # Una zona que ya tiene una lesion activa no es una lesion nueva: el LLM puede volver
-        # a reportarla al leer el historial. No se inserta otra fila ni se marca como nueva.
-        zonas = {_normalizar(l.zona) for l in previas}
-        nuevas: list[Lesion] = []
-        for lesion in analisis.lesiones_nuevas:
-            zona = _normalizar(lesion.zona)
-            if zona in zonas:
-                continue
-            zonas.add(zona)
-            nuevas.append(lesion)
-            await self.repo.agregar_lesion(uid, lesion)
-        lesiones = await self.repo.lesiones_activas(uid) if nuevas else previas
+        nuevas, cambios = await self._registrar_lesiones(uid, previas, analisis.lesiones_nuevas)
+        lesiones = await self.repo.lesiones_activas(uid) if (nuevas or cambios) else previas
         lesion_nueva = any(l.activa for l in nuevas)
 
         # Lesion nueva: se retira YA de la rutina persistida lo que bloquean sus zonas conocidas,
@@ -302,7 +310,7 @@ class Nodos:
                 rutina = depurada
 
         excluidos = list(estado.get("ejercicios_excluidos") or [])
-        dolor, ejercicio = self._dolor_del_mensaje(mensaje, analisis, dolor_por_palabra, excluidos)
+        dolor, ejercicio = self._dolor_del_mensaje(mensaje, analisis, dolor_por_palabra)
         if dolor:
             if ejercicio in self.catalogo:
                 if ejercicio not in excluidos:
@@ -336,45 +344,77 @@ class Nodos:
         }
 
     def _dolor_del_mensaje(
-        self, mensaje: str, analisis: AnalisisMensaje, por_palabra: bool, excluidos: list[str]
+        self, mensaje: str, analisis: AnalisisMensaje, por_lexico: bool
     ) -> tuple[bool, str | None]:
         """Decide de forma determinista si el mensaje ACTUAL reporta dolor que escala a humano.
 
-        El LLM ve el historial y puede volver a marcar un dolor ya atendido; el codigo no se fia:
-        - palabra clave de dolor agudo en el mensaje actual: escala siempre (suelo determinista);
-        - dolor del LLM sobre un ejercicio ya excluido: ya se atendio, no vuelve a escalar;
-        - dolor del LLM sobre un ejercicio aun no excluido: escala;
-        - dolor del LLM sin ejercicio identificable: escala solo si el mensaje habla de dolor.
+        - senal del lexico de dolor en el mensaje actual: escala siempre, aunque el ejercicio ya
+          este excluido (dolor renovado);
+        - dolor marcado por el LLM: escala solo si su `cita_dolor` aparece en el mensaje actual
+          (verificado aqui). Sin cita o con una cita que no esta en el mensaje, ese dolor viene
+          del historial: no escala y se registra en el log.
         """
-        ejercicio = self._resolver_ejercicio(analisis.ejercicio_con_dolor)
-        if por_palabra:
-            return True, ejercicio or self._ejercicio_en_texto(mensaje)
-        if not analisis.dolor_agudo:
+        llm_valido = analisis.dolor_agudo and cita_en_mensaje(analisis.cita_dolor, mensaje)
+        if analisis.dolor_agudo and not llm_valido:
+            logger.info(
+                "Dolor marcado por el LLM sin cita en el mensaje actual (viene del historial): "
+                "no se escala (cita=%r)", analisis.cita_dolor,
+            )
+        if not (por_lexico or llm_valido):
             return False, None
-        if ejercicio in self.catalogo:
-            return ejercicio not in excluidos, ejercicio
-        if not habla_de_dolor(mensaje):
-            return False, None
-        ejercicio = self._ejercicio_en_texto(mensaje)
-        if ejercicio in excluidos:
-            return False, None
+        ejercicio = self._resolver_ejercicio(analisis.ejercicio_con_dolor) or self._ejercicio_en_texto(
+            mensaje
+        )
         return True, ejercicio
+
+    async def _registrar_lesiones(
+        self, uid: UUID, previas: list[Lesion], reportadas: list[LesionReportada]
+    ) -> tuple[list[Lesion], list[Lesion]]:
+        """Guarda las lesiones reportadas. Devuelve (nuevas, actualizadas).
+
+        Una zona (normalizada) con una lesion activa no es nueva: no se inserta otra fila. Si
+        la severidad cambia, se actualiza la existente (nunca se descarta en silencio).
+        """
+        activas = {_normalizar(l.zona): l for l in previas if l.activa}
+        nuevas: list[Lesion] = []
+        actualizadas: list[Lesion] = []
+        for reportada in reportadas:
+            for lesion in expandir_lesion(reportada):
+                existente = activas.get(_normalizar(lesion.zona))
+                if existente is None:
+                    await self.repo.agregar_lesion(uid, lesion)
+                    activas[_normalizar(lesion.zona)] = lesion
+                    nuevas.append(lesion)
+                elif lesion.activa and lesion.severidad != existente.severidad:
+                    await self.repo.actualizar_severidad_lesion(uid, existente.zona, lesion.severidad)
+                    logger.info("Lesion en %s: severidad %s -> %s", existente.zona,
+                                existente.severidad, lesion.severidad)
+                    existente = existente.model_copy(update={"severidad": lesion.severidad})
+                    activas[_normalizar(lesion.zona)] = existente
+                    actualizadas.append(existente)
+                elif not lesion.activa:
+                    logger.info("Lesion en %s reportada como no activa: se mantiene activa "
+                                "(no se da de alta por el LLM)", existente.zona)
+        return nuevas, actualizadas
 
     def _prompt_evaluador(
         self, estado: EstadoCoach, perfil: Perfil | None, lesiones: list[Lesion] | None = None
     ) -> list[BaseMessage]:
-        zonas = ", ".join(sorted(REGLAS_LESION))
+        zonas = ", ".join([*sorted(REGLAS_LESION), *ZONAS_GENERICAS, ZONA_OTRA])
         registradas = ", ".join(sorted({l.zona for l in lesiones or []})) or "ninguna"
         sistema = (
             "Eres el evaluador de un coach de gimnasio. Extrae SOLO del ultimo mensaje del "
             "usuario: datos de perfil (objetivo, dias_disponibles 1-7, equipo, nivel), lesiones "
-            f"nuevas (zona en formato snake_case, por ejemplo: {zonas}), y si reporta dolor agudo "
+            f"nuevas (zona, una de: {zonas}; usa hombro o rodilla si no dice el lado y otra, con "
+            "descripcion, para cualquier otra zona), y si reporta dolor agudo "
             "o dolor que empeora durante un ejercicio (dolor_agudo) y en que ejercicio. "
-            "Los mensajes anteriores son solo contexto: dolor_agudo, ejercicio_con_dolor y "
-            "lesiones_nuevas se extraen solo del ultimo mensaje. Si el ultimo mensaje no reporta "
-            "dolor, dolor_agudo es false aunque el historial lo mencione; si no reporta una "
-            "lesion, lesiones_nuevas queda vacia. No repitas lesiones ya registradas "
-            f"(zonas activas: {registradas}). "
+            "Los mensajes anteriores son solo contexto: dolor_agudo, ejercicio_con_dolor, "
+            "cita_dolor y lesiones_nuevas se extraen solo del ultimo mensaje. Si dolor_agudo es "
+            "true, copia en cita_dolor el fragmento literal del ultimo mensaje donde reporta el "
+            "dolor. Si el ultimo mensaje no reporta dolor, dolor_agudo es false aunque el "
+            "historial lo mencione; si no reporta una lesion, lesiones_nuevas queda vacia. No "
+            f"repitas lesiones ya registradas (zonas activas: {registradas}) salvo que cambie su "
+            "severidad. "
             "Deja vacio lo que no se mencione. "
             f"Perfil actual: {perfil.model_dump_json() if perfil else 'ninguno'}."
         )

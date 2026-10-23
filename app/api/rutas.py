@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Request
 from fastapi.responses import JSONResponse
 from langgraph.types import Command
 
+from app.agentes.checkpointer import ModeloNoReconstruible
 from app.agentes.grafo import config_hilo
 from app.agentes.nodos import texto_pausa
 from app.api.esquemas import (
@@ -57,6 +58,14 @@ class ConversacionPausada(Exception):
         self.thread_id = thread_id
 
 
+class ConversacionReiniciada(Exception):
+    """El checkpoint del hilo no se pudo reconstruir: se borro el hilo y hay que reenviar."""
+
+    def __init__(self, thread_id: str):
+        super().__init__(thread_id)
+        self.thread_id = thread_id
+
+
 class RutinaEnRevision(Exception):
     """La rutina no se sirve mientras el hilo del usuario espera la revision humana."""
 
@@ -69,6 +78,28 @@ def _pausa_pendiente(estado: Any) -> bool:
     """True si el hilo espera un `interrupt` (HITL). Un hilo que fallo a mitad de turno tiene
     `next` pero no interrupciones: ese no se considera en pausa."""
     return bool(getattr(estado, "interrupts", ()))
+
+
+async def _reiniciar_hilo(grafo: Any, thread_id: str, exc: ModeloNoReconstruible) -> None:
+    """Borra solo los checkpoints de ese hilo (Postgres no se toca) y avisa con 409."""
+    logger.error("Checkpoint irrecuperable del hilo %s; se reinicia el hilo: %s", thread_id, exc)
+    await grafo.checkpointer.adelete_thread(thread_id)
+    raise ConversacionReiniciada(thread_id) from exc
+
+
+async def _estado_hilo(grafo: Any, config: dict) -> Any:
+    try:
+        return await grafo.aget_state(config)
+    except ModeloNoReconstruible as exc:
+        await _reiniciar_hilo(grafo, config["configurable"]["thread_id"], exc)
+
+
+async def _invocar(grafo: Any, entrada: Any, config: dict) -> dict:
+    try:
+        return await grafo.ainvoke(entrada, config)
+    except ModeloNoReconstruible as exc:
+        await _reiniciar_hilo(grafo, config["configurable"]["thread_id"], exc)
+        raise  # inalcanzable: _reiniciar_hilo siempre lanza
 
 
 def _dep(request: Request, nombre: str, descripcion: str) -> Any:
@@ -111,12 +142,12 @@ async def chat(request: Request, entrada: MensajeEntrada) -> MensajeSalida:
     config = config_hilo(entrada.usuario_id)
     # Una entrada nueva sobre un hilo en pausa descartaria la pausa HITL: se rechaza (409) y
     # el cliente debe reanudar con POST /hitl/{thread_id}/reanudar.
-    if _pausa_pendiente(await grafo.aget_state(config)):
+    if _pausa_pendiente(await _estado_hilo(grafo, config)):
         raise ConversacionPausada(hilo)
     logger.info("chat thread_id=%s usuario_id=%s", hilo, entrada.usuario_id)
     with contexto_traza("chat", thread_id=hilo, usuario_id=hilo):
-        salida = await grafo.ainvoke(
-            {"usuario_id": entrada.usuario_id, "mensaje": entrada.mensaje}, config
+        salida = await _invocar(
+            grafo, {"usuario_id": entrada.usuario_id, "mensaje": entrada.mensaje}, config
         )
     return _respuesta_grafo(salida, str(entrada.usuario_id))
 
@@ -160,7 +191,7 @@ async def rutina_actual(request: Request, usuario_id: UUID) -> RutinaSalida:
     catalogo = _dep(request, "catalogo", "Catálogo de ejercicios")
     # Sin el estado del hilo no se puede saber si hay una revision pendiente: falla cerrado.
     grafo = _dep(request, "grafo", "Coach")
-    estado = await grafo.aget_state(config_hilo(usuario_id))
+    estado = await _estado_hilo(grafo, config_hilo(usuario_id))
     if _pausa_pendiente(estado):  # cubre tambien lesiones en zonas sin regla
         raise RutinaEnRevision()
     rutina = await repo.rutina_actual(usuario_id)
@@ -187,12 +218,12 @@ async def rutina_actual(request: Request, usuario_id: UUID) -> RutinaSalida:
 async def reanudar(request: Request, thread_id: UUID, entrada: ReanudarEntrada) -> MensajeSalida:
     grafo = _dep(request, "grafo", "Coach")
     config = config_hilo(thread_id)  # thread_id == str(usuario_id)
-    estado = await grafo.aget_state(config)
+    estado = await _estado_hilo(grafo, config)
     if not _pausa_pendiente(estado):
         raise SinPausaPendiente()
     logger.info("hitl thread_id=%s usuario_id=%s", thread_id, thread_id)
     with contexto_traza("hitl_reanudar", thread_id=str(thread_id), usuario_id=str(thread_id)):
-        salida = await grafo.ainvoke(Command(resume=entrada.revision), config)
+        salida = await _invocar(grafo, Command(resume=entrada.revision), config)
     return _respuesta_grafo(salida, str(thread_id))
 
 

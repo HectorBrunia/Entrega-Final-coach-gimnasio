@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
@@ -67,6 +67,16 @@ class RepositorioDominio:
                 usuario_id=usuario_id, zona=lesion.zona,
                 severidad=lesion.severidad, activa=lesion.activa,
             ))
+
+    async def actualizar_severidad_lesion(self, usuario_id: UUID, zona: str, severidad: str) -> None:
+        """Cambia la severidad de las lesiones activas del usuario en esa zona (sin filas nuevas)."""
+        async with self._sesion_factory() as s, s.begin():
+            await s.execute(
+                update(LesionTabla)
+                .where(LesionTabla.usuario_id == usuario_id, LesionTabla.zona == zona,
+                       LesionTabla.activa.is_(True))
+                .values(severidad=severidad)
+            )
 
     async def lesiones_activas(self, usuario_id: UUID) -> list[Lesion]:
         async with self._sesion_factory() as s:

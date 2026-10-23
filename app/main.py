@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.rutas import (
-    TIMEOUT_SALUD_SEG, ConversacionPausada, EjercicioDesconocido, NoEncontrado,
+    TIMEOUT_SALUD_SEG, ConversacionPausada, ConversacionReiniciada, EjercicioDesconocido, NoEncontrado,
     RutinaEnRevision, RutinaNoSegura, ServicioNoDisponible, SinPausaPendiente, router,
 )
 from app.domain.modelos import Ejercicio
@@ -58,6 +58,14 @@ def _registrar_manejadores(app: FastAPI) -> None:
             409,
             "La conversación está pausada para revisión humana. Reanúdala con "
             f"POST /hitl/{exc.thread_id}/reanudar antes de enviar mensajes nuevos.",
+        )
+
+    @app.exception_handler(ConversacionReiniciada)
+    async def _reiniciada(_: Request, __: ConversacionReiniciada):
+        return _json(
+            409,
+            "La conversación guardada no se pudo recuperar y se reinició; vuelve a enviar tu "
+            "mensaje. Tu perfil, lesiones y rutinas se conservan.",
         )
 
     @app.exception_handler(RutinaEnRevision)
