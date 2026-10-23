@@ -265,7 +265,7 @@ el [golden set](evaluacion/golden_set.json) y escribe
 
 | Parte | Resultado |
 |---|---|
-| Recuperación | 13 casos, 12 aciertos: hit rate@5 = 0,923, MRR@5 = 0,731 (falla R12) |
+| Recuperación | 13 casos, 12 aciertos: hit rate@5 = 0,923, MRR@5 = 0,769 (falla R12) |
 | Seguridad determinista | 5 casos: 0 violaciones, 0 sobrebloqueos, 0 ids fuera del catálogo |
 | Seguridad del grafo | 5 casos, 5 rutinas generadas: 0 violaciones, 0 respuestas sin aviso (Gemini real, modelo `gemini-3.5-flash-lite`) |
 
@@ -278,7 +278,6 @@ contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_AP
 `pytest tests/sistema -m sistema` contra Gemini real (modelo `gemini-3.5-flash-lite`) con el
 stack completo de docker: 6 pruebas pasadas (onboarding, ajuste semanal, lesión activa, lesión
 nueva, dolor agudo con pausa y reanudación, fuera de alcance), cada una con su traza en Phoenix.
-Cinco ejecuciones consecutivas en verde sobre el código final.
 
 ## Fuentes y licencias
 
