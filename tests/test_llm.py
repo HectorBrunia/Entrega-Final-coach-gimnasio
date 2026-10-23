@@ -1,15 +1,17 @@
+import httpx
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_google_genai.chat_models import (
+    ChatGoogleGenerativeAIError,
     GoogleAPIError,
     GoogleAuthenticationError,
     GoogleInvalidRequestError,
     GoogleRateLimitError,
 )
 
-from app.llm import MSG_CONFIGURACION, MSG_TRANSITORIO, LLMNoDisponible, crear_llm
+from app.llm import MSG_CONFIGURACION, MSG_RECHAZADA, MSG_TRANSITORIO, LLMNoDisponible, crear_llm
 from app.settings import Settings
 
 
@@ -102,17 +104,19 @@ async def test_503_persistente_lanza_llm_no_disponible_transitorio(settings, mon
     assert "high demand" not in str(info.value)
 
 
-@pytest.mark.parametrize("error", [
-    GoogleAuthenticationError("401 UNAUTHENTICATED api key not valid: clave-secreta"),
-    GoogleInvalidRequestError("400 INVALID_ARGUMENT"),
+@pytest.mark.parametrize("error,mensaje", [
+    (GoogleAuthenticationError("401 UNAUTHENTICATED api key not valid: clave-secreta"),
+     MSG_CONFIGURACION),
+    (GoogleInvalidRequestError("400 INVALID_ARGUMENT"), MSG_RECHAZADA),
+    (ChatGoogleGenerativeAIError("422 UNPROCESSABLE clave-secreta"), MSG_RECHAZADA),
 ])
-async def test_error_permanente_no_se_reintenta(settings, monkeypatch, error):
+async def test_error_permanente_no_se_reintenta(settings, monkeypatch, error, mensaje):
     llamadas = _parchear_generacion(monkeypatch, 99, error)
     llm = crear_llm(settings, reintentos=3, espera_base=0.0)
     with pytest.raises(LLMNoDisponible) as info:
         await llm.ainvoke("hola")
     assert len(llamadas) == 1
-    assert info.value.mensaje_publico == MSG_CONFIGURACION
+    assert info.value.mensaje_publico == mensaje
     assert "clave-secreta" not in str(info.value)
 
 
@@ -143,4 +147,34 @@ def test_reintenta_en_modo_sincrono(settings, monkeypatch):
     monkeypatch.setattr(ChatGoogleGenerativeAI, "_generate", _falso)
     llm = crear_llm(settings, reintentos=2, espera_base=0.0)
     assert llm.invoke("hola").content == "ok"
+    assert len(llamadas) == 2
+
+
+async def test_reintenta_ante_timeout_de_conexion(settings, monkeypatch):
+    llamadas = _parchear_generacion(monkeypatch, 2, httpx.ConnectTimeout("timeout"))
+    llm = crear_llm(settings, reintentos=3, espera_base=0.0)
+    assert (await llm.ainvoke("hola")).content == "ok"
+    assert len(llamadas) == 3
+
+
+async def test_error_de_red_persistente_lanza_llm_no_disponible_transitorio(settings, monkeypatch):
+    llamadas = _parchear_generacion(monkeypatch, 99, httpx.ReadError("reset"))
+    llm = crear_llm(settings, reintentos=2, espera_base=0.0)
+    with pytest.raises(LLMNoDisponible) as info:
+        await llm.ainvoke("hola")
+    assert len(llamadas) == 3
+    assert info.value.mensaje_publico == MSG_TRANSITORIO
+
+
+async def test_408_envuelto_se_reintenta(settings, monkeypatch):
+    from google.genai.errors import ClientError
+
+    original = ClientError(408, {"error": {"status": "DEADLINE_EXCEEDED"}}, None)
+    try:
+        raise ChatGoogleGenerativeAIError("408") from original
+    except ChatGoogleGenerativeAIError as e:
+        error = e
+    llamadas = _parchear_generacion(monkeypatch, 1, error)
+    llm = crear_llm(settings, reintentos=2, espera_base=0.0)
+    assert (await llm.ainvoke("hola")).content == "ok"
     assert len(llamadas) == 2

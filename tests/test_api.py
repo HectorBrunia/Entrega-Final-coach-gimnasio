@@ -218,7 +218,8 @@ def _error_401():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fabrica,mensaje", [
-    (_error_503, MSG_TRANSITORIO), (_error_401, MSG_CONFIGURACION)])
+    (_error_503, MSG_TRANSITORIO), (_error_401, MSG_CONFIGURACION),
+    (lambda: __import__("httpx").ReadTimeout("secreto"), MSG_TRANSITORIO)])
 async def test_chat_con_error_del_proveedor_en_nodo_devuelve_503_claro(
         monkeypatch, fabrica, mensaje):
     grafo = _grafo_con_llm_que_falla(monkeypatch, fabrica())

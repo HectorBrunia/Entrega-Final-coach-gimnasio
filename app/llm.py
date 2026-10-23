@@ -6,6 +6,7 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+import httpx
 from google.genai.errors import ClientError, ServerError
 from langchain_core.exceptions import (
     ModelAuthenticationError,
@@ -18,6 +19,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 
 from app.settings import Settings
 
@@ -33,27 +35,40 @@ logger = logging.getLogger(__name__)
 #   subclases de `ModelAuthenticationError`/`ModelPermissionDeniedError`/
 #   `ModelInvalidRequestError`/`ModelNotFoundError`, y `google.genai.errors.ClientError`.
 # Cualquier otra excepcion (p. ej. de validacion) no se toca: se propaga tal cual.
+# - Red: `httpx.TransportError` (timeouts, conexion, lectura) llega sin envolver desde google-genai.
+# - 408: `ClientError` code=408, que langchain envuelve en `ChatGoogleGenerativeAIError`
+#   generico (el original queda en `__cause__`). Transitorio.
+# - Resto de errores del proveedor (`ChatGoogleGenerativeAIError` generico: 409/413/422,
+#   exceso de contexto...) son permanentes con mensaje neutro (RECHAZADA).
 ErrorLimiteTasa = ModelRateLimitError
-ERRORES_PERMANENTES: tuple[type[BaseException], ...] = (
+ERRORES_CONFIGURACION: tuple[type[BaseException], ...] = (
     ModelAuthenticationError,
     ModelPermissionDeniedError,
-    ModelInvalidRequestError,
     ModelNotFoundError,
+)
+ERRORES_PROVEEDOR: tuple[type[BaseException], ...] = (
+    ModelInvalidRequestError,
     ClientError,
+    ChatGoogleGenerativeAIError,
 )
 
 MSG_TRANSITORIO = "El servicio del modelo está saturado o caído; inténtalo más tarde"
 MSG_CONFIGURACION = "Error de configuración del modelo (clave o modelo inválidos)"
+MSG_RECHAZADA = "El modelo rechazó la petición"
 
 TRANSITORIO = "transitorio"
-PERMANENTE = "permanente"
+PERMANENTE = "permanente"  # configuracion: 401/403/404
+RECHAZADA = "rechazada"  # cualquier otro error permanente del proveedor
+
+_MENSAJES = {TRANSITORIO: MSG_TRANSITORIO, PERMANENTE: MSG_CONFIGURACION, RECHAZADA: MSG_RECHAZADA}
 
 
 class LLMNoDisponible(RuntimeError):
     """El modelo no esta disponible: error transitorio persistente o error permanente.
 
-    `motivo` es `TRANSITORIO` (reintentos agotados) o `PERMANENTE` (clave/modelo invalidos).
-    El mensaje es generico: nunca incluye el cuerpo del proveedor ni secretos.
+    `motivo` es `TRANSITORIO` (reintentos agotados), `PERMANENTE` (clave/modelo invalidos)
+    o `RECHAZADA` (otro rechazo del proveedor). El mensaje es generico: nunca incluye el
+    cuerpo del proveedor ni secretos.
     """
 
     def __init__(self, mensaje: str | None = None, *, motivo: str = TRANSITORIO):
@@ -62,20 +77,34 @@ class LLMNoDisponible(RuntimeError):
 
     @property
     def mensaje_publico(self) -> str:
-        return MSG_CONFIGURACION if self.motivo == PERMANENTE else MSG_TRANSITORIO
+        return _MENSAJES.get(self.motivo, MSG_TRANSITORIO)
+
+
+def _codigo_http(error: BaseException) -> int | None:
+    """Codigo HTTP del error o de su causa (langchain envuelve el ClientError original)."""
+    for e in (error, error.__cause__):
+        codigo = getattr(e, "code", None)
+        if isinstance(codigo, int):
+            return codigo
+    return None
 
 
 def clasificar_error(error: BaseException) -> str | None:
-    """`TRANSITORIO` (429 o 5xx), `PERMANENTE` (4xx de configuracion) o None (ajeno)."""
+    """`TRANSITORIO` (429, 5xx, 408, red), `PERMANENTE`, `RECHAZADA` o None (ajeno)."""
     if isinstance(error, LLMNoDisponible):
         return None
-    if isinstance(error, ErrorLimiteTasa):
+    if isinstance(error, (ErrorLimiteTasa, httpx.TransportError)):
         return TRANSITORIO
     if isinstance(error, ServerError):
         codigo = getattr(error, "code", None)
-        return TRANSITORIO if not isinstance(codigo, int) or codigo >= 500 else PERMANENTE
-    if isinstance(error, ERRORES_PERMANENTES):
-        return PERMANENTE
+        return TRANSITORIO if not isinstance(codigo, int) or codigo >= 500 else RECHAZADA
+    if isinstance(error, ERRORES_PROVEEDOR + ERRORES_CONFIGURACION):
+        codigo = _codigo_http(error)
+        if codigo == 408:
+            return TRANSITORIO
+        if isinstance(error, ERRORES_CONFIGURACION) or codigo in (401, 403, 404):
+            return PERMANENTE
+        return RECHAZADA
     return None
 
 
@@ -98,9 +127,9 @@ class GeminiConReintentos(ChatGoogleGenerativeAI):
         tipo = clasificar_error(error)
         if tipo is None:
             raise error
-        if tipo == PERMANENTE:
+        if tipo != TRANSITORIO:
             logger.error("Error permanente del modelo: %s", type(error).__name__)
-            raise LLMNoDisponible(motivo=PERMANENTE) from error
+            raise LLMNoDisponible(motivo=tipo) from error
         if intento >= self.reintentos_429:
             logger.error(
                 "Modelo no disponible tras %d reintentos: %s", intento, type(error).__name__
