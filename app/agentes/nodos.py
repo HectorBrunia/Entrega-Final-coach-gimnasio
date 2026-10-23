@@ -55,21 +55,60 @@ AVISO_MEDICO = "Esto no es un diagnóstico médico."
 # coincidencia en el mensaje ACTUAL basta para pausar a revision humana, diga lo que diga el
 # LLM. Criterio amplio a proposito: ante la duda, escalar. Reportar una lesion ("me lesione
 # ...") NO es senal de dolor agudo: va por la ruta de lesiones (registro + bloqueo por zona).
+# Dolor u opresion en el pecho y falta de aire: senal de urgencia. Siempre escala a HITL y la
+# plantilla (fija, sin LLM) recomienda atencion medica inmediata.
+PATRONES_PECHO: tuple[str, ...] = (
+    r"\bopresi\w*",                                   # opresion (en el pecho)
+    r"\baprieta\w* (?:el |en el )?pecho\b",           # me aprieta el pecho
+    r"\b(?:me cuesta|no puedo) respirar\b",           # dificultad para respirar
+    r"\bfalta (?:de )?aire\b",                        # me falta el aire / falta de aire
+    r"\bme falta el aire\b",
+)
+_PATRONES_PECHO = tuple(re.compile(p) for p in PATRONES_PECHO)
+_PECHO = re.compile(r"\bpecho\b")
+
 PATRONES_DOLOR: tuple[str, ...] = (
-    r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler
-    r"\bduel(?:e|en|a|an)\b",     # duele, duelen
+    r"\bdol(?:or|i|e)\w*",        # dolor, dolores, dolia, dolio, doliendo, doler (no "dolar")
+    r"\bduel(?:e|en|a|an)\b",     # duele, duelen (no "duelo")
     r"\badolor\w*",               # adolorido
-    r"\bmolest\w*",               # molestia, me molesta
+    r"\bmolest\w*",               # molestia, me molesta (falso positivo aceptado: "te molesta si")
     r"\btiron\w*",                # tiron, tirones
+    r"\bme (?:tira|tiran|tiraba|esta tirando)\b",  # me tira el gemelo (no "tirar mas peso")
     r"\bpinch\w*",                # pinchazo, pincha
-    r"\bard(?:e|en|er|or|ia|io|iendo|ido|ida)\w*",  # arde, ardor, ardiendo
+    r"\bard(?:e|en|er|or|ia|io|iendo|ido|ida)\w*",  # arde, ardor, ardiendo (no "ardilla")
     r"\bpunz\w*",                 # punzada, punzante
-    r"\bcalambre\w*",
-    r"\blastim\w*",
-    r"\bhormigue\w*",
-    r"\bme hice dano\b",
-    r"\bno puedo mover\w*",
-    r"\bse me (?:durmio|duerme|duermen|durmieron)\b",
+    r"\bcalambre\w*",             # calambre(s)
+    r"\blastim\w*",               # me lastime
+    r"\bhormigue\w*",             # hormigueo
+    r"\bme (?:quema|queman|quemaba)\b",  # me quema el hombro (no "quemar grasa")
+    r"\bquemazon\w*",             # quemazon
+    r"\binflam\w*",               # se me inflamo, inflamacion (no "antiinflamatorio")
+    r"\bhinch\w*",                # hinchada, hinchazon
+    r"\btorc[ie]\w*",             # me torci, torcido, torcedura
+    r"\besguin\w*",               # esguince, me esguince
+    r"\bdesgarr\w*",              # desgarro, me desgarre
+    r"\blux[ao]\w*",              # luxacion, se me luxo
+    r"\bdislo(?:c|qu)\w*",        # dislocacion, me disloque
+    r"\bse me (?:ha )?salido\b|\bse me salio\b",  # se me salio el hombro
+    r"\bfractur\w*",              # fractura
+    r"\brompi\w*",                # me rompi (no "rotacion")
+    r"\bse (?:me )?(?:ha )?(?:rompio|roto)\b",    # algo se rompio
+    r"\bchasquid\w*",             # chasquido
+    r"\bcruj\w*",                 # crujio, crujido
+    r"\bresent\w*|\bresient\w*",  # me resenti, me resiente
+    r"\blatigazo\w*",             # latigazo
+    r"\bescuec\w*|\bescoc\w*",    # me escuece
+    r"\bsensacion (?:rara|extrana)\b",  # sensacion rara en el hombro
+    r"\bme fastidia\w*",          # me fastidia la rodilla
+    r"\bme (?:jodi|he jodido)\b", # me jodi la espalda
+    r"\bmare(?:o|os|e|ado|ada|ando)\b",  # mareo, me maree (senal de alarma)
+    r"\bentumec\w*",              # entumecido
+    r"\bse me (?:ha )?bloquea(?:do)?\b|\bse me bloqueo\b",  # se me bloqueo la espalda
+    r"\bme (?:esta|estan) matando\b",  # la rodilla me esta matando
+    r"\bme hice dano\b",          # me hice dano
+    r"\bno (?:me )?puedo (?:mover|levantar|apoyar|doblar|estirar|agachar|girar)\w*",
+    r"\bse me (?:durmio|duerme|duermen|durmieron)\b",  # se me durmio la mano
+    *PATRONES_PECHO,
 )
 _PATRONES_DOLOR = tuple(re.compile(p) for p in PATRONES_DOLOR)
 
@@ -89,9 +128,19 @@ MSG_RESPUESTA_INSEGURA = (
 # Plantillas fijas por motivo de la pausa HITL (sin LLM). "otro" cubre escalado_supervisor y
 # cualquier motivo futuro: nunca se afirma dolor agudo si no se detecto.
 MOTIVO_DOLOR = "dolor_agudo"
+MOTIVO_PECHO = "dolor_pecho"
 MOTIVO_ZONA = "zona_sin_regla"
 
+_URGENCIA = (
+    "Busca atención médica inmediata: llama a emergencias (112) o acude a urgencias. "
+    "No sigas entrenando."
+)
+
 _PAUSA = {
+    MOTIVO_PECHO: (
+        f"Conversación pausada para revisión humana: reportaste dolor u opresión en el pecho. "
+        f"{_URGENCIA}"
+    ),
     MOTIVO_DOLOR: (
         "Conversación pausada para revisión humana: reportaste dolor agudo. Detén ese "
         "ejercicio y consulta a un profesional de la salud."
@@ -107,6 +156,10 @@ _PAUSA = {
 }
 
 _TRAS_REVISION = {
+    MOTIVO_PECHO: (
+        "Reportaste dolor u opresión en el pecho{sobre}. " + _URGENCIA.replace("{", "{{")
+        + " Un profesional de la salud debe valorarte antes de volver a entrenar."
+    ),
     MOTIVO_DOLOR: (
         "Reportaste dolor agudo{sobre}. Detén el ejercicio y consulta a un profesional "
         "(médico o fisioterapeuta) antes de continuar. No voy a recomendarte más ese ejercicio."
@@ -134,10 +187,26 @@ def detectar_dolor_agudo(mensaje: str) -> bool:
     return any(p.search(texto) for p in _PATRONES_DOLOR)
 
 
+def detectar_dolor_pecho(mensaje: str) -> bool:
+    """Dolor, opresion o falta de aire en el pecho: urgencia (siempre HITL y atencion inmediata)."""
+    texto = _normalizar(mensaje)
+    if any(p.search(texto) for p in _PATRONES_PECHO):
+        return True
+    return bool(_PECHO.search(texto)) and detectar_dolor_agudo(mensaje)
+
+
+CITA_MIN_PALABRAS = 2
+CITA_MIN_CARACTERES = 8
+
+
 def cita_en_mensaje(cita: str | None, mensaje: str) -> bool:
-    """La cita del LLM aparece literalmente (tras normalizar) en el mensaje actual."""
-    cita_norm = _normalizar(cita or "").strip(" .,;:!?\"'")
-    return len(cita_norm) >= 3 and cita_norm in _normalizar(mensaje)
+    """La cita del LLM (al menos 2 palabras y 8 caracteres tras normalizar) aparece
+    literalmente, como palabras completas, en el mensaje actual."""
+    cita_norm = " ".join(re.sub(r"[^\w\s]", " ", _normalizar(cita or "")).split())
+    texto = " ".join(re.sub(r"[^\w\s]", " ", _normalizar(mensaje)).split())
+    if len(cita_norm.split()) < CITA_MIN_PALABRAS or len(cita_norm) < CITA_MIN_CARACTERES:
+        return False
+    return _contiene(texto, cita_norm)
 
 
 def _slug(texto: str) -> str:
@@ -334,7 +403,8 @@ class Nodos:
             "volumen": None,
             "lesion_nueva": lesion_nueva,
             "requiere_humano": dolor,
-            "motivo_humano": MOTIVO_DOLOR if dolor else None,
+            "motivo_humano": (MOTIVO_PECHO if detectar_dolor_pecho(mensaje) else MOTIVO_DOLOR)
+            if dolor else None,
             "ejercicio_con_dolor": (ejercicio or analisis.ejercicio_con_dolor) if dolor else None,
             "ejercicios_excluidos": excluidos,
             "explicacion": "",

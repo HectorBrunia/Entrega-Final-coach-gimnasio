@@ -716,7 +716,7 @@ async def test_zona_sin_regla_get_rutina_409_mientras_la_pausa_esta_pendiente(
         LesionReportada(zona="otra", descripcion="tobillo", severidad="leve")])]})
     grafo = await _grafo(settings, repo, llm)
     async with _cliente_api(grafo, repo) as c:
-        r = await c.post("/chat", json={"usuario_id": str(usuario), "mensaje": "me torci el tobillo"})
+        r = await c.post("/chat", json={"usuario_id": str(usuario), "mensaje": "tengo una lesion en el tobillo"})
         assert r.json()["requiere_humano"] is True
         assert "dolor agudo" not in r.json()["respuesta"]
         r = await c.get(f"/usuarios/{usuario}/rutinas/actual")
@@ -781,7 +781,7 @@ async def test_escalado_del_supervisor_sin_dolor_no_dice_dolor_agudo(settings, r
     })
     grafo = await _grafo(settings, repo, llm)
     cfg = config_hilo(usuario)
-    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me mareo al entrenar"}, cfg)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "tengo la tension alta, puedo entrenar?"}, cfg)
     assert salida["__interrupt__"][0].value["motivo"] == "escalado_supervisor"
     final = await grafo.ainvoke(Command(resume="ok"), cfg)
     assert "dolor agudo" not in final["respuesta"].lower()
@@ -1162,3 +1162,113 @@ async def test_reportar_una_lesion_la_registra_y_bloquea_sin_pausa_de_dolor(sett
     assert [l.zona for l in repo.lesiones[usuario]] == ["hombro_derecho"]
     assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
     assert "press_militar" not in salida["respuesta"] and "press militar" not in salida["respuesta"]
+
+
+# --- N1: lexico de lesion aguda (frases de la re-revision) y dolor en el pecho ----------------
+
+# Frases de dolor o lesion aguda de la re-revision (fix-dolor-rutina-rereview.md): las que el
+# lexico ya detectaba y las 27 que no. Todas deben escalar.
+SONDA_DOLOR = [
+    # detectadas antes
+    "me duele", "tengo dolor", "siento una molestia", "me pincha", "no aguanto el dolor",
+    "me crujió y ahora duele", "me ardió", "me arde", "ardor", "un dolor punzante", "punzadas",
+    "pinchazo", "me dio un tirón", "me lastimé", "me sigue doliendo", "me dolió", "hormigueo",
+    "se me durmió la mano", "no puedo mover el brazo", "calambres", "me hice daño", "adolorido",
+    "MOLESTIA", "me molestaba",
+    # no detectadas antes
+    "me tira el gemelo", "me quema el hombro", "se me inflamó", "me torcí el tobillo",
+    "sentí un chasquido en el hombro", "algo crujió en la rodilla", "me resentí",
+    "me resiente el hombro", "está hinchada", "tengo la rodilla hinchada",
+    "me dio un latigazo en la espalda", "me escuece", "sensación rara en el hombro",
+    "me crujió la espalda y no me puedo agachar", "me fastidia la rodilla", "me jodí la espalda",
+    "me rompí algo", "sentí que algo se rompió", "no puedo levantar el brazo",
+    "se me salió el hombro", "me desgarré el gemelo", "tengo un desgarro", "tengo un esguince",
+    "me esguincé", "la espalda me está matando", "la rodilla me está matando",
+    "me cuesta respirar y me aprieta el pecho", "me mareé",
+    # vocabulario de la regla N1
+    "tengo el tobillo torcido", "creo que tengo una fractura", "se me luxó el hombro",
+    "me disloqué el codo", "noto opresión en el pecho", "tengo el brazo entumecido",
+    "se me bloqueó la espalda", "no puedo apoyar el pie", "no puedo doblar la rodilla",
+    "no puedo estirar el brazo",
+]
+
+# No son dolor agudo: frases de gimnasio, lesion reportada (regla F) y agujetas (DOMS, fallo
+# aceptado por la re-revision).
+SONDA_SIN_DOLOR = [
+    "quiero tirar más peso", "hice press con mancuernas", "sumo 5 kg", "dame una rutina",
+    "Dame una rutina nueva de 3 días para esta semana.", "quiero quemar grasa",
+    "rutina de pecho y espalda", "ejercicios de rotación de cadera",
+    "hice 3 series de press de banca", "registra mi entreno de ayer por la tarde", "me lesioné la rodilla", "tengo agujetas",
+    "tiro de cadera con barra", "estiramientos para la espalda", "tengo 100 dolares para equipo",
+]
+
+
+@pytest.mark.parametrize("texto", SONDA_DOLOR)
+def test_sonda_de_dolor_agudo_escala(texto):
+    assert detectar_dolor_agudo(texto)
+
+
+@pytest.mark.parametrize("texto", SONDA_SIN_DOLOR)
+def test_sonda_sin_dolor_no_escala(texto):
+    assert not detectar_dolor_agudo(texto)
+
+
+@pytest.mark.parametrize("texto", SONDA_DOLOR)
+async def test_sonda_de_dolor_pausa_el_grafo_sin_flag_del_llm(settings, repo, usuario, texto):
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": texto}, config_hilo(usuario))
+    assert "__interrupt__" in salida
+    assert salida["__interrupt__"][0].value["motivo"] in ("dolor_agudo", "dolor_pecho")
+
+
+@pytest.mark.parametrize("texto", [
+    "me cuesta respirar y me aprieta el pecho", "noto opresión en el pecho",
+    "me duele el pecho", "tengo un pinchazo en el pecho con el press banca",
+])
+def test_dolor_en_el_pecho_es_senal_de_urgencia(texto):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert detectar_dolor_pecho(texto)
+
+
+@pytest.mark.parametrize("texto", ["rutina de pecho y espalda", "me duele la rodilla",
+                                   "press de pecho con mancuernas"])
+def test_pecho_sin_dolor_no_es_urgencia(texto):
+    from app.agentes.nodos import detectar_dolor_pecho
+
+    assert not detectar_dolor_pecho(texto)
+
+
+async def test_dolor_en_el_pecho_pausa_con_plantilla_de_atencion_medica_inmediata(
+    settings, repo, usuario
+):
+    llm = LLMFalso(estructuradas={"AnalisisMensaje": [AnalisisMensaje()]})
+    grafo = await _grafo(settings, repo, llm)
+    uid = str(usuario)
+    async with _cliente_api(grafo, repo) as c:
+        r = await c.post("/chat", json={"usuario_id": uid,
+                                        "mensaje": "me cuesta respirar y me aprieta el pecho"})
+        assert r.status_code == 200 and r.json()["requiere_humano"] is True
+        pausa = r.json()["respuesta"].lower()
+        assert "atención médica inmediata" in pausa and "112" in pausa
+        assert AVISO_MEDICO.lower() in pausa
+        r = await c.post(f"/hitl/{uid}/reanudar", json={"revision": "ok"})
+        final = r.json()["respuesta"].lower()
+        assert "atención médica inmediata" in final and "112" in final
+    assert "DecisionSupervisor" not in llm.llamadas
+
+
+@pytest.mark.parametrize("cita", ["dol", "que", "raro", "me"])
+def test_cita_corta_no_cuenta(cita):
+    from app.agentes.nodos import cita_en_mensaje
+
+    assert not cita_en_mensaje(cita, "que raro, me duele el hombro con el press")
+
+
+def test_cita_de_dos_palabras_y_ocho_caracteres_cuenta():
+    from app.agentes.nodos import cita_en_mensaje
+
+    assert cita_en_mensaje("algo raro", "Noto algo raro en el hombro")
+    assert cita_en_mensaje("Algo RARO.", "noto algo raro en el hombro")
+    assert not cita_en_mensaje("algo raro", "noto algo extraño en el hombro")
