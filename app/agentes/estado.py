@@ -54,14 +54,20 @@ class AnalisisMensaje(BaseModel):
         default=None, description="Datos de perfil que el usuario menciona en este mensaje."
     )
     lesiones_nuevas: list[Lesion] = Field(
-        default_factory=list, description="Lesiones nuevas que el usuario reporta."
+        default_factory=list, description=(
+            "Lesiones nuevas que el usuario reporta en el mensaje actual (no las del historial "
+            "ni las ya registradas)."
+        ),
     )
     dolor_agudo: bool = Field(
         default=False,
-        description="True si reporta dolor agudo o dolor que empeora durante un ejercicio.",
+        description=(
+            "True solo si el mensaje actual reporta dolor agudo o dolor que empeora durante un "
+            "ejercicio. False si el dolor solo aparece en mensajes anteriores."
+        ),
     )
     ejercicio_con_dolor: str | None = Field(
-        default=None, description="Id del ejercicio que le provoca dolor, si lo menciona."
+        default=None, description="Id del ejercicio que le provoca dolor, si lo menciona en el mensaje actual."
     )
 
 

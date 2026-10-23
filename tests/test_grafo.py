@@ -829,3 +829,109 @@ async def test_chat_en_pausa_con_redis_devuelve_409_y_reanuda(settings, repo, us
     async with abrir_checkpointer_redis(url) as saver:
         grafo = await _grafo(settings, repo, llm, saver)
         await _pausa_chat_409_y_reanudar(grafo, repo, usuario, llm)
+
+
+# --- dolor y lesiones: solo cuentan los del mensaje actual (no el historial) --------------
+
+async def _pausa_por_dolor_y_reanuda(settings, repo, usuario, siguiente: AnalisisMensaje):
+    """Turno 1: dolor con press_banca -> pausa -> reanudar. Devuelve grafo, llm y cfg."""
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_banca", "sentadilla")))
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje(dolor_agudo=True, ejercicio_con_dolor="press_banca"),
+                            siguiente],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [_plan("sentadilla")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    cfg = config_hilo(usuario)
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "pinchazo con press_banca"}, cfg)
+    assert "__interrupt__" in salida
+    await grafo.ainvoke(Command(resume="revisado"), cfg)
+    assert not (await grafo.aget_state(cfg)).interrupts
+    return grafo, llm, cfg
+
+
+async def test_dolor_del_historial_sobre_un_ejercicio_ya_excluido_no_vuelve_a_pausar(
+    settings, repo, usuario
+):
+    # el LLM vuelve a marcar el dolor del turno anterior (lo lee del historial)
+    grafo, llm, cfg = await _pausa_por_dolor_y_reanuda(
+        settings, repo, usuario,
+        AnalisisMensaje(dolor_agudo=True, ejercicio_con_dolor="press_banca"))
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "Dame una rutina nueva de 3 días para esta semana."}, cfg)
+    assert "__interrupt__" not in salida
+    assert salida["requiere_humano"] is False
+    assert salida["motivo_humano"] is None
+    assert salida["ejercicios_excluidos"] == ["press_banca"]
+    assert _ids_rutina(await repo.rutina_actual(usuario)) == {"sentadilla"}
+
+
+async def test_palabra_clave_de_dolor_tras_reanudar_vuelve_a_pausar(settings, repo, usuario):
+    grafo, llm, cfg = await _pausa_por_dolor_y_reanuda(settings, repo, usuario, AnalisisMensaje())
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "otra vez un dolor agudo en el pecho"}, cfg)
+    assert "__interrupt__" in salida
+    assert salida["__interrupt__"][0].value["motivo"] == "dolor_agudo"
+
+
+async def test_dolor_en_otro_ejercicio_tras_reanudar_vuelve_a_pausar(settings, repo, usuario):
+    grafo, llm, cfg = await _pausa_por_dolor_y_reanuda(
+        settings, repo, usuario,
+        AnalisisMensaje(dolor_agudo=True, ejercicio_con_dolor="sentadilla"))
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "algo raro me pasa en la sentadilla"}, cfg)
+    assert "__interrupt__" in salida
+    assert salida["__interrupt__"][0].value["ejercicio"] == "sentadilla"
+    assert "sentadilla" in (await grafo.aget_state(cfg)).values["ejercicios_excluidos"]
+
+
+async def test_dolor_del_llm_sin_ejercicio_solo_pausa_si_el_mensaje_habla_de_dolor(
+    settings, repo, usuario
+):
+    grafo, llm, cfg = await _pausa_por_dolor_y_reanuda(
+        settings, repo, usuario, AnalisisMensaje(dolor_agudo=True))
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "Dame una rutina nueva"}, cfg)
+    assert "__interrupt__" not in salida
+    salida = await grafo.ainvoke(
+        {"usuario_id": usuario, "mensaje": "me duele el hombro al entrenar"}, cfg)
+    assert "__interrupt__" in salida
+
+
+async def test_lesion_repetida_en_la_misma_zona_no_se_duplica(settings, repo, usuario):
+    hombro = Lesion(zona="hombro_derecho", severidad="moderada", activa=True)
+    await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1,
+                                     dias=_dias("press_militar", "sentadilla")))
+    llm = LLMFalso(estructuradas={
+        "AnalisisMensaje": [AnalisisMensaje(lesiones_nuevas=[hombro]),
+                            AnalisisMensaje(lesiones_nuevas=[
+                                hombro.model_copy(update={"severidad": "grave"})])],
+        "DecisionSupervisor": [DecisionSupervisor(destino="programador")],
+        "PlanPropuesto": [_plan("sentadilla")],
+    })
+    grafo = await _grafo(settings, repo, llm)
+    cfg = config_hilo(usuario)
+    await grafo.ainvoke({"usuario_id": usuario, "mensaje": "me lesione el hombro derecho"}, cfg)
+    assert len(repo.lesiones[usuario]) == 1
+
+    salida = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "Dame una rutina nueva"}, cfg)
+    assert len(repo.lesiones[usuario]) == 1  # misma zona activa: no es nueva ni se inserta
+    assert salida["lesion_nueva"] is False
+    # no se fuerza la revalidacion por "lesion nueva": el supervisor decide y se programa
+    assert "DecisionSupervisor" in llm.llamadas
+    assert "PlanPropuesto" in llm.llamadas
+
+
+async def test_prompt_del_evaluador_limita_dolor_y_lesiones_al_mensaje_actual(repo, usuario):
+    from app.agentes.nodos import Nodos
+
+    nodos = Nodos(repo, CATALOGO, LLMFalso(), _buscador_falso)
+    sistema = nodos._prompt_evaluador(
+        {"usuario_id": usuario, "mensaje": "hola", "mensajes": []}, None,
+        [Lesion(zona="hombro_derecho", severidad="moderada", activa=True)])[0].content
+    assert "solo del ultimo mensaje" in sistema.lower()
+    assert "hombro_derecho" in sistema  # lesiones ya registradas: no se reportan de nuevo
+    for campo in ("dolor_agudo", "ejercicio_con_dolor", "lesiones_nuevas"):
+        descripcion = AnalisisMensaje.model_fields[campo].description.lower()
+        assert "mensaje actual" in descripcion
