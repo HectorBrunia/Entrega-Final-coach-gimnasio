@@ -55,20 +55,27 @@ ERRORES_PROVEEDOR: tuple[type[BaseException], ...] = (
 MSG_TRANSITORIO = "El servicio del modelo está saturado o caído; inténtalo más tarde"
 MSG_CONFIGURACION = "Error de configuración del modelo (clave o modelo inválidos)"
 MSG_RECHAZADA = "El modelo rechazó la petición"
+MSG_NO_CONFIGURADO = (
+    "Falta configurar GOOGLE_API_KEY (y GEMINI_MODEL) en .env para usar el coach conversacional"
+)
 
 TRANSITORIO = "transitorio"
 PERMANENTE = "permanente"  # configuracion: 401/403/404
 RECHAZADA = "rechazada"  # cualquier otro error permanente del proveedor
+NO_CONFIGURADO = "no_configurado"  # sin GOOGLE_API_KEY o GEMINI_MODEL: nunca se llama a Gemini
 
-_MENSAJES = {TRANSITORIO: MSG_TRANSITORIO, PERMANENTE: MSG_CONFIGURACION, RECHAZADA: MSG_RECHAZADA}
+_MENSAJES = {
+    TRANSITORIO: MSG_TRANSITORIO, PERMANENTE: MSG_CONFIGURACION, RECHAZADA: MSG_RECHAZADA,
+    NO_CONFIGURADO: MSG_NO_CONFIGURADO,
+}
 
 
 class LLMNoDisponible(RuntimeError):
     """El modelo no esta disponible: error transitorio persistente o error permanente.
 
-    `motivo` es `TRANSITORIO` (reintentos agotados), `PERMANENTE` (clave/modelo invalidos)
-    o `RECHAZADA` (otro rechazo del proveedor). El mensaje es generico: nunca incluye el
-    cuerpo del proveedor ni secretos.
+    `motivo` es `TRANSITORIO` (reintentos agotados), `PERMANENTE` (clave/modelo invalidos),
+    `RECHAZADA` (otro rechazo del proveedor) o `NO_CONFIGURADO` (falta la clave o el modelo).
+    El mensaje es generico: nunca incluye el cuerpo del proveedor ni secretos.
     """
 
     def __init__(self, mensaje: str | None = None, *, motivo: str = TRANSITORIO):
@@ -204,6 +211,36 @@ class GeminiConReintentos(ChatGoogleGenerativeAI):
                     self.rate_limiter.acquire(blocking=True)
 
 
+class LLMSinConfigurar(BaseChatModel):
+    """Sustituto del modelo cuando faltan GOOGLE_API_KEY o GEMINI_MODEL.
+
+    Permite construir el grafo (y servir perfil, rutinas y entrenos) sin clave: cualquier
+    llamada al modelo lanza `LLMNoDisponible(motivo=NO_CONFIGURADO)`, que la API traduce a 503
+    con un mensaje que explica que configurar. Nunca hace peticiones de red.
+    """
+
+    @property
+    def _llm_type(self) -> str:
+        return "sin_configurar"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        raise LLMNoDisponible(motivo=NO_CONFIGURADO)
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
+        raise LLMNoDisponible(motivo=NO_CONFIGURADO)
+
+    def with_structured_output(self, schema, **kwargs: Any):
+        from langchain_core.runnables import RunnableLambda
+
+        def _falla(_entrada):
+            raise LLMNoDisponible(motivo=NO_CONFIGURADO)
+
+        async def _afalla(_entrada):
+            raise LLMNoDisponible(motivo=NO_CONFIGURADO)
+
+        return RunnableLambda(_falla, afunc=_afalla)
+
+
 def crear_llm(
     settings: Settings,
     *,
@@ -218,7 +255,11 @@ def crear_llm(
       explicitamente); al agotarlos, o ante un error permanente, lanza `LLMNoDisponible`.
     - Los reintentos internos del SDK se desactivan (`max_retries=1`) para que la unica
       politica de reintento sea la de este modulo.
+    - Sin clave o sin modelo (`settings.llm_configurado` falso) devuelve `LLMSinConfigurar`.
     """
+    if not settings.llm_configurado:
+        logger.warning("GOOGLE_API_KEY o GEMINI_MODEL sin configurar: /chat y /hitl responderan 503")
+        return LLMSinConfigurar()
     limitador = InMemoryRateLimiter(
         requests_per_second=settings.gemini_rpm / 60.0,
         check_every_n_seconds=0.1,

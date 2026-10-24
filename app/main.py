@@ -212,6 +212,15 @@ def crear_app(
                 await asyncio.to_thread(indice_bloqueo, app.state.catalogo)
             if app.state.comprobaciones is None and motor is not None:
                 app.state.comprobaciones = _comprobaciones(cfg, motor)
+            if app.state.grafo is None:
+                # sin clave o modelo de Gemini el grafo se construye igual (con un modelo que
+                # responde 503): perfil, rutinas y entrenos siguen funcionando
+                app.state.llm_configurado = cfg.llm_configurado
+                if not cfg.llm_configurado:
+                    logger.warning(
+                        "Falta GOOGLE_API_KEY o GEMINI_MODEL: la API arranca sin el coach "
+                        "conversacional (/chat y /hitl responden 503)"
+                    )
             if (
                 app.state.grafo is None
                 and app.state.catalogo is not None
@@ -236,6 +245,8 @@ def crear_app(
     app.state.repo = repo
     app.state.catalogo = catalogo
     app.state.comprobaciones = comprobaciones
+    # None: desconocido (grafo inyectado); el lifespan lo fija si construye el grafo
+    app.state.llm_configurado = None
     _registrar_manejadores(app)
     app.include_router(router)
     return app

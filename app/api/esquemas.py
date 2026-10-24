@@ -107,9 +107,15 @@ class ReanudarEntrada(BaseModel):
 class EstadoSalud(BaseModel):
     status: Literal["ok", "degradado"]
     servicios: dict[str, str]
+    # Informativo: si el coach conversacional (Gemini) esta configurado. No afecta al codigo
+    # HTTP (200/503), que depende solo de postgres, redis y qdrant.
+    llm: Literal["configurado", "no_configurado"] | None = None
 
     model_config = ConfigDict(json_schema_extra={"examples": [
-        {"status": "ok", "servicios": {"postgres": "ok", "redis": "ok", "qdrant": "ok"}},
+        {"status": "ok", "servicios": {"postgres": "ok", "redis": "ok", "qdrant": "ok"},
+         "llm": "configurado"},
+        {"status": "ok", "servicios": {"postgres": "ok", "redis": "ok", "qdrant": "ok"},
+         "llm": "no_configurado"},
         {"status": "degradado",
          "servicios": {"postgres": "ok", "redis": "error", "qdrant": "ok"}},
     ]})

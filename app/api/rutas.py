@@ -18,6 +18,7 @@ from app.api.esquemas import (
     PerfilSalida, ReanudarEntrada, RegistroEntrenoEntrada, RutinaSalida, UsuarioSalida,
 )
 from app.domain.modelos import EntrenoRegistro
+from app.llm import NO_CONFIGURADO, LLMNoDisponible
 from app.observabilidad import contexto_traza
 from app.safety.reglas import ids_bloqueados, indice_bloqueo
 
@@ -109,6 +110,12 @@ def _dep(request: Request, nombre: str, descripcion: str) -> Any:
     return valor
 
 
+def _exigir_llm(request: Request) -> None:
+    """Sin GOOGLE_API_KEY/GEMINI_MODEL el coach conversacional no puede responder: 503 claro."""
+    if getattr(request.app.state, "llm_configurado", None) is False:
+        raise LLMNoDisponible(motivo=NO_CONFIGURADO)
+
+
 def _respuesta_grafo(salida: dict, thread_id: str) -> MensajeSalida:
     interrupciones = salida.get("__interrupt__")
     if interrupciones:
@@ -137,6 +144,7 @@ async def crear_usuario(
     responses={409: {"model": ErrorSalida}, 503: {"model": ErrorSalida}},
 )
 async def chat(request: Request, entrada: MensajeEntrada) -> MensajeSalida:
+    _exigir_llm(request)
     grafo = _dep(request, "grafo", "Coach")
     hilo = str(entrada.usuario_id)  # thread_id == str(usuario_id)
     config = config_hilo(entrada.usuario_id)
@@ -218,6 +226,7 @@ async def rutina_actual(request: Request, usuario_id: UUID) -> RutinaSalida:
     responses={409: {"model": ErrorSalida}, 503: {"model": ErrorSalida}},
 )
 async def reanudar(request: Request, thread_id: UUID, entrada: ReanudarEntrada) -> MensajeSalida:
+    _exigir_llm(request)
     grafo = _dep(request, "grafo", "Coach")
     config = config_hilo(thread_id)  # thread_id == str(usuario_id)
     estado = await _estado_hilo(grafo, config)
@@ -256,5 +265,10 @@ async def health(request: Request):
     )
     servicios = dict(zip(nombres, resultados))
     ok = all(v == "ok" for v in servicios.values())
-    estado = EstadoSalud(status="ok" if ok else "degradado", servicios=servicios)
-    return JSONResponse(status_code=200 if ok else 503, content=estado.model_dump())
+    # "llm" es informativo: no cambia el 200/503, que solo depende de los servicios de datos
+    llm = getattr(request.app.state, "llm_configurado", None)
+    estado = EstadoSalud(
+        status="ok" if ok else "degradado", servicios=servicios,
+        llm=None if llm is None else ("configurado" if llm else "no_configurado"),
+    )
+    return JSONResponse(status_code=200 if ok else 503, content=estado.model_dump(exclude_none=True))
