@@ -1,5 +1,15 @@
 # Coach de gimnasio con IA
 
+Una API FastAPI asíncrona recibe cada mensaje y lo pasa a un grafo de LangGraph donde un
+Supervisor enruta entre nodos especialistas (Evaluador, Programador, Progreso, Seguridad, HITL y
+Síntesis). Ninguna rutina llega al usuario sin pasar por `seguridad`, una capa determinista
+(sin LLM) que filtra los ejercicios contraindicados por lesión y, ante la duda, falla cerrado y
+pausa la conversación para revisión humana: el LLM nunca es la última línea de defensa. El
+Programador arma las rutinas con un RAG híbrido (denso + BM25) sobre Qdrant, con fusión RRF en
+el servidor. Postgres guarda los datos de dominio (perfiles, lesiones, entrenos, rutinas
+versionadas) y Redis guarda el estado de la conversación como checkpointer del grafo; cada
+petición deja su traza en Phoenix. Todo se levanta con un comando (`bash run.sh` o `run.ps1`).
+
 Coach de entrenamiento conversacional. A través de una API HTTP:
 
 1. Construye el perfil del usuario conversando (objetivo, días disponibles, equipo, nivel y lesiones).
@@ -137,6 +147,54 @@ Cliente HTTP ──► FastAPI (async, Pydantic) ──► Grafo LangGraph (Supe
 | [scripts](scripts) | Ingesta, verificación de trazas, verificación de persistencia en Redis, revisión de bloqueos |
 | [evaluacion](evaluacion) | Golden set, script de evaluación y resultados |
 
+## De dónde sale cada pieza
+
+Este proyecto ensambla y refactoriza las pre-entregas del curso; no reutiliza su dominio
+(políticas internas de una empresa ficticia), sino sus patrones.
+
+| Pre-entrega | Dónde vive ahora | Qué cambió y por qué |
+|---|---|---|
+| Unified Async LLM Client (cliente async) | [app/llm.py](app/llm.py) | Se conservan los reintentos con espera exponencial y la clasificación de errores del proveedor (transitorios 429/5xx/red frente a permanentes 4xx), ahora sobre `ChatGoogleGenerativeAI` de LangChain para que el grafo y las trazas lo usen tal cual. Se suma un limitador de tasa (`InMemoryRateLimiter`, `GEMINI_RPM`) por el plan gratuito. No se trajeron el multiproveedor (OpenAI/Anthropic), el fallback entre proveedores ni el streaming: solo se usa Gemini. |
+| validated-extraction-pipeline (cadenas LCEL con contratos Pydantic) | [app/agentes/estado.py](app/agentes/estado.py), [app/agentes/nodos.py](app/agentes/nodos.py), [app/herramientas](app/herramientas) | El patrón `with_structured_output` + modelo Pydantic pasa a cada llamada al LLM (`AnalisisMensaje`, `DecisionSupervisor`, `PlanPropuesto`, `RespuestaConversacion`). Las herramientas validan entradas y salidas con `pydantic.validate_call`. El `with_retry` de la cadena lo reemplaza la política de reintentos de `app/llm.py`. |
+| Sistema de recuperación semántica local (RAG, pre-entrega 3) y Sistema RAG escalable con Pinecone (pre-entrega 4) | [app/rag](app/rag), [scripts/ingerir.py](scripts/ingerir.py), [evaluacion](evaluacion) | Chroma y luego Pinecone + BM25 en memoria (`EnsembleRetriever`) se reemplazan por Qdrant con vectores densos y dispersos (BM25 de fastembed) en la misma colección y fusión RRF en el servidor, con `AsyncQdrantClient` y filtros por metadatos. Corre en docker sin cuentas externas. La evaluación con golden set se mantiene, con hit rate@5 y MRR@5 en lugar de Precision@5/Recall@5, y suma casos de seguridad. |
+| Agente de razonamiento cíclico con memoria persistente (Módulo 5) | [app/agentes/checkpointer.py](app/agentes/checkpointer.py) | El checkpointer por `thread_id` pasa de `AsyncSqliteSaver` a `AsyncRedisSaver` (vía la pre-entrega 7), con Redis en modo AOF y un serializador propio que conserva los modelos Pydantic y los `UUID` del estado. El bucle ReAct en el que el LLM elige herramientas libremente no se trajo: aquí el enrutamiento lo decide el Supervisor con guardas deterministas. |
+| Orquestador multi-agente especializado (Módulo 6) | [app/agentes](app/agentes) | Se mantiene la topología jerárquica: Supervisor con guardas deterministas alrededor del LLM y especialistas que no se hablan entre sí. El validador determinista del M6 pasa a ser el nodo `seguridad` (filtro de lesiones de [app/safety](app/safety)), con el mismo bucle de reparación acotado hacia el especialista. La tool RAG del investigador pasa a ser `buscar_conocimiento`, que usa el Programador. El analista con su calculadora no tiene equivalente. |
+| API de producción y monitoreo activo (Módulo 7) | [app/api](app/api), [app/main.py](app/main.py), [app/observabilidad.py](app/observabilidad.py) | Se mantienen FastAPI async, el checkpointer `AsyncRedisSaver`, el HITL con `interrupt()` y reanudación por endpoint, y `GET /health` (ahora comprueba Postgres, Redis y Qdrant, y la app arranca degradada en vez de caerse). LangSmith se reemplaza por Phoenix local. La cola Arq, el worker y el estado de jobs en Redis no se trajeron (ver decisiones). |
+
+## Decisiones de arquitectura
+
+- **Qdrant en lugar de Pinecone.** Búsqueda híbrida densa + dispersa nativa con RRF en el
+  servidor, cliente async y ejecución local en docker sin cuenta. Contra: hay que operar el
+  servicio y fijar la versión de la imagen al cliente (ver arranque).
+- **Phoenix en lugar de LangSmith.** Autoalojado en el compose, sin cuenta ni claves, con
+  OpenTelemetry + OpenInference. Contra: no trae el costo por ejecución ni los paneles de
+  LangSmith, y las trazas viven en el volumen local.
+- **Postgres para el dominio, Redis para la conversación.** Perfiles, lesiones, entrenos y
+  rutinas se consultan fuera del grafo (API, evaluación), así que van a tablas con migraciones;
+  el estado del grafo por `thread_id` va al checkpointer. Contra: dos almacenes que mantener
+  coherentes (por ejemplo, la rutina guardada y una pausa HITL pendiente).
+- **Capa de seguridad determinista y falla cerrado.** El filtro por zona de lesión se aplica
+  antes de elegir candidatos y otra vez en `seguridad`; una zona sin regla, el dolor agudo o un
+  síntoma cardiaco van a HITL. Una señal del LLM solo cuenta si cita literalmente el mensaje
+  actual. Contra: reglas amplias que bloquean de más y pausas por falsos positivos.
+- **Nada de planes en texto libre.** Solo el camino `programador` → `seguridad` entrega
+  rutinas; si la respuesta de la Síntesis parece una prescripción, se sustituye por un mensaje
+  fijo (guarda por regex más la marca estructurada del LLM). Contra: alguna respuesta inocua
+  se reemplaza.
+- **Gemini flash-lite con límite de tasa y reintentos.** Pensado para el plan gratuito:
+  `GEMINI_RPM` y espera exponencial ante 429/5xx; si se agotan, la API responde 503 y sigue en
+  servicio. Contra: latencia mayor bajo carga y un solo proveedor.
+- **Sin cola ni worker.** El spec lo dejó fuera por defecto: cada turno de `/chat` se procesa
+  en línea y la pausa larga (HITL) ya la resuelve el checkpointer. Contra: una petición ocupa
+  la conexión mientras el grafo corre.
+- **Rutinas versionadas.** Cada ajuste crea una versión nueva (`usuario_id`, `version` únicos)
+  en lugar de pisar la anterior, para poder comparar versiones. Contra: la tabla crece con el
+  historial.
+- **Dependencias inyectables.** `crear_app` recibe el grafo, el repositorio y las
+  comprobaciones de salud; `construir_grafo` y `Nodos` reciben el LLM, el buscador y el
+  checkpointer. Las pruebas usan dobles y `InMemorySaver` sin servicios reales. Contra: más
+  parámetros en el arranque.
+
 ## Grafo de agentes
 
 Definido en [app/agentes/grafo.py](app/agentes/grafo.py); los nodos están en
@@ -195,7 +253,7 @@ Detalles que el diagrama resume:
 | Pydantic | Esquemas de la API ([app/api/esquemas.py](app/api/esquemas.py)), modelos de dominio ([app/domain/modelos.py](app/domain/modelos.py)), herramientas validadas en tiempo de ejecución con `pydantic.validate_call` (entradas y salidas, [app/herramientas/funciones.py](app/herramientas/funciones.py); `volumen_semanal` resume las series por músculo de cada rutina nueva), salidas estructuradas del LLM y configuración con pydantic-settings ([app/settings.py](app/settings.py)) |
 | Observabilidad | [app/observabilidad.py](app/observabilidad.py): Phoenix + OpenInference; cada petición a `/chat` y `/hitl/.../reanudar` abre un span con `thread_id` y `usuario_id`, del que cuelgan los spans del grafo y del LLM |
 | 7 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding (en un mensaje y repartido en dos), ajuste semanal, lesión activa, lesión nueva, dolor agudo con pausa y reanudación y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
-| README y diagrama | Este archivo (diagrama Mermaid del grafo) |
+| README y diagrama | Este archivo: diagrama Mermaid del grafo, [De dónde sale cada pieza](#de-dónde-sale-cada-pieza) y [Decisiones de arquitectura](#decisiones-de-arquitectura) |
 | Despliegue local con un comando | [run.sh](run.sh) / [run.ps1](run.ps1), [docker-compose.yml](docker-compose.yml) y [Dockerfile](Dockerfile); imágenes y dependencias con versión fija |
 
 ## Seguridad
