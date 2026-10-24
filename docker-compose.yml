@@ -7,10 +7,10 @@
 # Los puertos del host se pueden cambiar con API_PORT, POSTGRES_PORT, REDIS_PORT, QDRANT_PORT y
 # PHOENIX_PORT (p. ej. si ya estan ocupados).
 
-# Configuracion comun de api e init (misma imagen).
+# Configuracion comun de api e init (misma imagen; solo api la construye, ver init).
+# COACH_IMAGE permite otro nombre de imagen (p. ej. para probar un clon sin pisar la imagen local).
 x-coach-app: &coach-app
-  build: .
-  image: coach-gimnasio-api:0.1.0
+  image: ${COACH_IMAGE:-coach-gimnasio-api:0.1.0}
   # .env es opcional; COACH_ENV_FILE permite apuntar a otro archivo.
   env_file:
     - path: ${COACH_ENV_FILE:-.env}
@@ -34,6 +34,10 @@ services:
   # igual: el RAG queda vacio, pero el resto funciona. Un fallo de las migraciones si detiene.
   init:
     <<: *coach-app
+    # Usa la imagen que construye api (compose construye antes de crear contenedores). Si los
+    # dos servicios la construyeran, en Windows compose exporta la misma imagen dos veces a la
+    # vez y falla; por eso init nunca la construye ni la descarga.
+    pull_policy: never
     command:
       - sh
       - -c
@@ -50,6 +54,7 @@ services:
 
   api:
     <<: *coach-app
+    build: .
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
