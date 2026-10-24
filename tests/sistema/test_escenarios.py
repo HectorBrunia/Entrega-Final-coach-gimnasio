@@ -279,3 +279,35 @@ async def test_pregunta_fuera_de_alcance_rechaza_sin_inventar_plan(cliente, repo
     # (c) sin aviso medico: no se exige porque la app lo anade a toda respuesta de sintesis
     #     (ver task-11-report.md, ronda de correcciones 1); no hay senal estructural de rechazo.
     await comprobar_traza_en_phoenix(entorno_sistema, "fuera_de_alcance", trace_id)
+
+
+# --- 6. Onboarding en dos mensajes --------------------------------------------------------------
+
+async def test_onboarding_en_dos_mensajes_completa_perfil_y_entrega_rutina_validada(
+    cliente, catalogo, entorno_sistema
+):
+    """Reproduce la prueba manual: el perfil llega repartido en dos mensajes. Tras el segundo
+    debe existir el perfil y una rutina del catalogo validada en ese mismo turno."""
+    usuario_id = await crear_usuario(cliente)
+    async with traza_escenario("onboarding_dos_mensajes") as trace_id:
+        await _chat(cliente, usuario_id, (
+            "Hola, quiero ganar masa muscular (hipertrofia). Puedo ir 2 días a la semana al "
+            "gimnasio y además hago 3 días de CrossFit."
+        ))
+        assert (await cliente.get(f"/usuarios/{usuario_id}/perfil")).status_code == 404
+        r = await _chat(cliente, usuario_id, (
+            "Soy intermedio. Entreno en un gimnasio completo: barra, mancuernas, máquinas y poleas."
+        ))
+
+    p = await cliente.get(f"/usuarios/{usuario_id}/perfil")
+    assert p.status_code == 200, p.text
+    assert p.json()["dias_disponibles"] == 2
+    assert p.json()["nivel"] == "intermedio"
+
+    rutina = await _rutina(cliente, usuario_id)
+    assert rutina is not None, f"no se guardo ninguna rutina; respuesta: {r['respuesta'][:300]}"
+    ids = _ids(rutina)
+    assert ids and set(ids) <= catalogo.keys()  # ids del catalogo, nada en texto libre
+    assert r["requiere_humano"] is False
+    assert r["respuesta"].count(AVISO_MEDICO) == 1
+    await comprobar_traza_en_phoenix(entorno_sistema, "onboarding_dos_mensajes", trace_id)
