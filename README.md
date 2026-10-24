@@ -194,7 +194,7 @@ Detalles que el diagrama resume:
 | Checkpointer | [app/agentes/checkpointer.py](app/agentes/checkpointer.py): `AsyncRedisSaver` con serializador que conserva los tipos del estado; Redis con AOF y volumen ([docker-compose.yml](docker-compose.yml)); comprobación de reinicio con [scripts/verificar_persistencia_redis.py](scripts/verificar_persistencia_redis.py) |
 | Pydantic | Esquemas de la API ([app/api/esquemas.py](app/api/esquemas.py)), modelos de dominio ([app/domain/modelos.py](app/domain/modelos.py)), herramientas validadas en tiempo de ejecución con `pydantic.validate_call` (entradas y salidas, [app/herramientas/funciones.py](app/herramientas/funciones.py); `volumen_semanal` resume las series por músculo de cada rutina nueva), salidas estructuradas del LLM y configuración con pydantic-settings ([app/settings.py](app/settings.py)) |
 | Observabilidad | [app/observabilidad.py](app/observabilidad.py): Phoenix + OpenInference; cada petición a `/chat` y `/hitl/.../reanudar` abre un span con `thread_id` y `usuario_id`, del que cuelgan los spans del grafo y del LLM |
-| 6 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding, ajuste semanal, lesión activa, lesión nueva, dolor agudo con pausa y reanudación y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
+| 7 pruebas de sistema con traza | [tests/sistema/test_escenarios.py](tests/sistema/test_escenarios.py): onboarding (en un mensaje y repartido en dos), ajuste semanal, lesión activa, lesión nueva, dolor agudo con pausa y reanudación y pregunta fuera de alcance; cada una comprueba que su traza llegó a Phoenix |
 | README y diagrama | Este archivo (diagrama Mermaid del grafo) |
 | Despliegue local con un comando | [run.sh](run.sh) / [run.ps1](run.ps1), [docker-compose.yml](docker-compose.yml) y [Dockerfile](Dockerfile); imágenes y dependencias con versión fija |
 
@@ -276,8 +276,9 @@ contiene ejercicios bloqueados; se ejecuta cuando están configuradas `GOOGLE_AP
 ### Resultados de las pruebas de sistema
 
 `pytest tests/sistema -m sistema` contra Gemini real (modelo `gemini-3.5-flash-lite`) con el
-stack completo de docker: 6 pruebas pasadas (onboarding, ajuste semanal, lesión activa, lesión
-nueva, dolor agudo con pausa y reanudación, fuera de alcance), cada una con su traza en Phoenix.
+stack completo de docker: 7 pruebas pasadas (onboarding en un mensaje, onboarding repartido en
+dos mensajes, ajuste semanal, lesión activa, lesión nueva, dolor agudo con pausa y reanudación,
+fuera de alcance), cada una con su traza en Phoenix.
 
 ## Fuentes y licencias
 
