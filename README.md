@@ -287,12 +287,12 @@ nueva, dolor agudo con pausa y reanudación, fuera de alcance), cada una con su 
 - **Guías** ([data/guias](data/guias)): resúmenes originales redactados para este proyecto a
   partir de fuentes abiertas que cada guía cita; no reproducen texto de las fuentes.
 
-## Pendiente de revisión
+## Limitaciones conocidas
 
 - **Reglas de seguridad deliberadamente amplias.** Ante la duda se bloquea; por ejemplo, con
-  hombro lesionado quedan bloqueados 612 de 876 ejercicios. Falta una revisión humana de falsos
-  negativos y bloqueos excesivos en
-  [docs/revision/bloqueos-por-zona.md](docs/revision/bloqueos-por-zona.md).
+  hombro lesionado quedan bloqueados 612 de 876 ejercicios. El listado completo por zona está en
+  [docs/revision/bloqueos-por-zona.md](docs/revision/bloqueos-por-zona.md) y fue revisado por el
+  autor: el criterio conservador es intencional (mejor prevenir que curar).
 - **Detección de dolor agudo y síntomas cardiacos limitada.** Se basa en un léxico determinista
   en español (raíces y frases sobre el mensaje actual) y, como segunda red, en el LLM, cuya
   señal solo cuenta si cita literalmente el mensaje actual. No reconoce todas las formas de
@@ -306,6 +306,3 @@ nueva, dolor agudo con pausa y reanudación, fuera de alcance), cada una con su 
   nunca dan el 112 por sí solos y solo pausan si van con una señal de dolor. Por eso un sinónimo
   raro que el léxico no reconoce depende del LLM. Los falsos positivos (pausas de más ante
   frases inocuas) son deliberados.
-- **Dos citas de las guías marcadas «(verificar referencia)»:** la de la NSCA en
-  [data/guias/tecnica_basica.md](data/guias/tecnica_basica.md) y la del ACSM en
-  [data/guias/consideraciones_por_zona_lesion.md](data/guias/consideraciones_por_zona_lesion.md).

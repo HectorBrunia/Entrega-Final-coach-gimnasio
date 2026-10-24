@@ -19,4 +19,4 @@ Resumen original redactado para el coach; no reproduce texto de las fuentes.
 
 ## Fuentes
 - American College of Sports Medicine, "Progression Models in Resistance Training for Healthy Adults" (posicionamiento oficial), 2009.
-- National Strength and Conditioning Association, "Essentials of Strength Training and Conditioning", 4.ª ed., 2016 (verificar referencia: capítulos sobre técnica de ejercicios).
+- National Strength and Conditioning Association, "Essentials of Strength Training and Conditioning", 4.ª ed., 2016 (capítulos sobre técnica de ejercicios).

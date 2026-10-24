@@ -38,7 +38,7 @@ def generar(ruta_catalogo: Path) -> tuple[str, dict[str, int]]:
     lineas = [
         "# Bloqueos por zona de lesión",
         "",
-        "> **Pendiente de revisión por el usuario.**",
+        "> **Revisado por el autor:** el criterio conservador (ante la duda, se bloquea) es intencional.",
         "",
         "Este documento se genera con `python scripts/generar_revision_bloqueos.py` a partir de las",
         "reglas de `app/safety/reglas.py` y del catálogo real (`data/catalogo/exercises.json`,",

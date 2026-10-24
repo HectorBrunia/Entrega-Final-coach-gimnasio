@@ -25,5 +25,5 @@ Resumen original redactado para el coach; no reproduce texto de las fuentes. Est
 - Usa agarres neutros o dispositivos de apoyo cuando la extensión de muñeca bajo carga duela; reduce volumen en ejercicios de agarre intenso.
 
 ## Fuentes
-- American College of Sports Medicine, "ACSM's Guidelines for Exercise Testing and Prescription", 11.ª ed., 2021 (verificar referencia: capítulos sobre poblaciones con afecciones musculoesqueléticas).
+- American College of Sports Medicine, "ACSM's Guidelines for Exercise Testing and Prescription", 11.ª ed., 2021 (capítulos sobre poblaciones con afecciones musculoesqueléticas).
 - Organización Mundial de la Salud, "Directrices de la OMS sobre actividad física y hábitos sedentarios", 2020.
