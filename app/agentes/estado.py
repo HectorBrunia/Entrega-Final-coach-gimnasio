@@ -83,8 +83,13 @@ class AnalisisMensaje(BaseModel):
     perfil: PerfilParcial | None = Field(
         default=None, description=(
             "Datos de perfil (objetivo, dias_disponibles, equipo, nivel) que el usuario da en el "
-            "mensaje actual o en los mensajes recientes de la conversacion. Si un dato cambia, "
-            "vale el mas reciente."
+            "ULTIMO mensaje. Sustituyen a los guardados."
+        ),
+    )
+    perfil_historial: PerfilParcial | None = Field(
+        default=None, description=(
+            "Datos de perfil que el usuario dio en mensajes ANTERIORES de la conversacion (no en "
+            "el ultimo). Solo completan datos que faltan; nunca sustituyen a los guardados."
         ),
     )
     lesiones_nuevas: list[LesionReportada] = Field(
@@ -133,6 +138,16 @@ class AnalisisMensaje(BaseModel):
     )
 
 
+class RespuestaConversacion(BaseModel):
+    """Salida estructurada de la conversacion libre de la sintesis."""
+
+    texto: str = Field(description="Respuesta al usuario, en español.")
+    contiene_ejercicios: bool = Field(description=(
+        "True si el texto recomienda o prescribe ejercicios concretos, series, repeticiones, "
+        "cargas o una rutina. False si no."
+    ))
+
+
 class DecisionSupervisor(BaseModel):
     destino: Destino
     motivo: str = ""
@@ -142,4 +157,4 @@ class PlanPropuesto(BaseModel):
     """Salida estructurada del programador y del agente de progreso."""
 
     dias: list[DiaRutina]
-    explicacion: str = ""
+    # Sin explicacion en texto libre: la respuesta con la rutina es determinista (spec 7).

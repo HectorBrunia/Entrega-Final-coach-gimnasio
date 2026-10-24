@@ -95,9 +95,16 @@ class LLMFalso(BaseChatModel):
 
     def with_structured_output(self, schema, **kwargs):
         def _salida(entrada):
+            cola = self.estructuradas.get(schema.__name__, [])
+            if schema.__name__ == "RespuestaConversacion" and not cola:
+                # la conversacion libre (sintesis) sin cola estructurada usa los textos fijos y
+                # se registra como "texto", igual que una llamada de texto libre
+                self.llamadas.append("texto")
+                self.entradas.append((schema.__name__, entrada))
+                texto = self.textos.pop(0) if self.textos else "Respuesta del coach."
+                return schema(texto=texto, contiene_ejercicios=False)
             self.llamadas.append(schema.__name__)
             self.entradas.append((schema.__name__, entrada))
-            cola = self.estructuradas.get(schema.__name__, [])
             if not cola:
                 return None
             r = cola.pop(0) if len(cola) > 1 else cola[0]
