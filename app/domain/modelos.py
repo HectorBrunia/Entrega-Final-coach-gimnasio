@@ -28,6 +28,20 @@ class Perfil(BaseModel):
         return normalizar_equipo(valor)
 
 
+class PerfilBorrador(BaseModel):
+    """Perfil en construccion: los datos que el usuario ya dio, repartidos en varios mensajes.
+
+    Todos los campos son opcionales. Se persiste hasta que valida como `Perfil` completo;
+    entonces se guarda el perfil y el borrador se borra. `equipo` ya va normalizado al
+    vocabulario del catalogo (un equipo vacio cuenta como dato que falta).
+    """
+
+    objetivo: str | None = None
+    dias_disponibles: int | None = Field(default=None, ge=1, le=7)
+    equipo: list[str] | None = None
+    nivel: Nivel | None = None
+
+
 class Lesion(BaseModel):
     zona: str
     severidad: Literal["leve", "moderada", "grave"]

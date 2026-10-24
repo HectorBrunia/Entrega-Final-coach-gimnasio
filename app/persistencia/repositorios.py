@@ -1,12 +1,15 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from app.domain.modelos import DiaRutina, EntrenoRegistro, Lesion, Nivel, Perfil, Rutina
+from app.domain.modelos import (
+    DiaRutina, EntrenoRegistro, Lesion, Nivel, Perfil, PerfilBorrador, Rutina,
+)
 from app.persistencia.tablas import (
-    EntrenoTabla, ExclusionDolorTabla, LesionTabla, PerfilTabla, RutinaTabla, UsuarioTabla,
+    EntrenoTabla, ExclusionDolorTabla, LesionTabla, PerfilBorradorTabla, PerfilTabla, RutinaTabla,
+    UsuarioTabla,
 )
 
 
@@ -45,6 +48,39 @@ class RepositorioDominio:
                 stmt.on_conflict_do_update(
                     index_elements=["usuario_id"], set_={**valores, "actualizado_en": func.now()}
                 )
+            )
+            # el perfil completo sustituye al borrador del onboarding (misma transaccion)
+            await s.execute(
+                delete(PerfilBorradorTabla).where(PerfilBorradorTabla.usuario_id == perfil.usuario_id)
+            )
+
+    async def guardar_perfil_borrador(self, usuario_id: UUID, borrador: PerfilBorrador) -> None:
+        """Guarda (upsert) el perfil parcial del onboarding; sustituye al anterior."""
+        valores = dict(
+            objetivo=borrador.objetivo,
+            dias_disponibles=borrador.dias_disponibles,
+            equipo=list(borrador.equipo) if borrador.equipo is not None else None,
+            nivel=borrador.nivel.value if borrador.nivel is not None else None,
+        )
+        async with self._sesion_factory() as s, s.begin():
+            await _asegurar_usuario(s, usuario_id)
+            stmt = pg_insert(PerfilBorradorTabla).values(usuario_id=usuario_id, **valores)
+            await s.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=["usuario_id"], set_={**valores, "actualizado_en": func.now()}
+                )
+            )
+
+    async def obtener_perfil_borrador(self, usuario_id: UUID) -> PerfilBorrador | None:
+        async with self._sesion_factory() as s:
+            fila = await s.get(PerfilBorradorTabla, usuario_id)
+            if fila is None:
+                return None
+            return PerfilBorrador(
+                objetivo=fila.objetivo,
+                dias_disponibles=fila.dias_disponibles,
+                equipo=list(fila.equipo) if fila.equipo is not None else None,
+                nivel=Nivel(fila.nivel) if fila.nivel is not None else None,
             )
 
     async def obtener_perfil(self, usuario_id: UUID) -> Perfil | None:

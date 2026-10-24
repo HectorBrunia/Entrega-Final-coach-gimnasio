@@ -38,6 +38,24 @@ class PerfilTabla(Base):
     )
 
 
+class PerfilBorradorTabla(Base):
+    """Perfil parcial mientras el onboarding no se completa (columnas nulas). Dato de dominio:
+    sobrevive a reinicios y a un hilo reiniciado; se borra al guardar el perfil completo."""
+
+    __tablename__ = "perfiles_borrador"
+
+    usuario_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True
+    )
+    objetivo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dias_disponibles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    equipo: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    nivel: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 class LesionTabla(Base):
     __tablename__ = "lesiones"
 

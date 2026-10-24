@@ -86,3 +86,59 @@ async def test_migracion_exclusiones_dolor_baja_y_sube(sesion_factory):
     assert not await existe()
     alembic("upgrade", "head")
     assert await existe()
+
+
+@pytest.mark.asyncio
+async def test_borrador_de_perfil_parcial_se_guarda_actualiza_y_se_limpia(sesion_factory):
+    from app.domain.modelos import PerfilBorrador
+
+    repo = RepositorioDominio(sesion_factory)
+    uid, otro = await repo.crear_usuario(), await repo.crear_usuario()
+    assert await repo.obtener_perfil_borrador(uid) is None
+
+    await repo.guardar_perfil_borrador(uid, PerfilBorrador(objetivo="hipertrofia", dias_disponibles=2))
+    await repo.guardar_perfil_borrador(otro, PerfilBorrador(nivel=Nivel.avanzado))
+    assert await repo.obtener_perfil_borrador(uid) == PerfilBorrador(
+        objetivo="hipertrofia", dias_disponibles=2)
+
+    # upsert: el borrador completo sustituye al anterior
+    await repo.guardar_perfil_borrador(uid, PerfilBorrador(
+        objetivo="hipertrofia", dias_disponibles=3, equipo=["barbell"]))
+    assert await repo.obtener_perfil_borrador(uid) == PerfilBorrador(
+        objetivo="hipertrofia", dias_disponibles=3, equipo=["barbell"])
+
+    # guardar el perfil completo limpia el borrador (misma transaccion), solo de ese usuario
+    await repo.guardar_perfil(Perfil(usuario_id=uid, objetivo="hipertrofia", dias_disponibles=3,
+                                     equipo=["barbell"], nivel=Nivel.intermedio))
+    assert await repo.obtener_perfil_borrador(uid) is None
+    assert await repo.obtener_perfil_borrador(otro) == PerfilBorrador(nivel=Nivel.avanzado)
+
+
+@pytest.mark.asyncio
+async def test_migracion_perfiles_borrador_baja_y_sube(sesion_factory):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from sqlalchemy import text
+
+    from tests.guarda_bd import resolver_url_pruebas
+
+    url, _ = resolver_url_pruebas(os.environ)
+    raiz = Path(__file__).resolve().parent.parent
+
+    def alembic(*args: str) -> None:
+        r = subprocess.run([sys.executable, "-m", "alembic", *args], cwd=raiz,
+                           capture_output=True, text=True, env={**os.environ, "DATABASE_URL": url})
+        assert r.returncode == 0, r.stderr
+
+    async def existe() -> bool:
+        async with sesion_factory() as s:
+            return bool(await s.scalar(text("SELECT to_regclass('public.perfiles_borrador') IS NOT NULL")))
+
+    assert await existe()
+    alembic("downgrade", "0002")
+    assert not await existe()
+    alembic("upgrade", "head")
+    assert await existe()
