@@ -1,24 +1,66 @@
+# Un solo comando desde un clon limpio: docker compose up -d   (con o sin .env)
+#
+# Orden de arranque: postgres, redis y qdrant (con healthcheck) -> init (migraciones de Alembic e
+# ingesta idempotente del catalogo y las guias en Qdrant; termina y sale con 0) -> api.
+# Sin .env (o sin GOOGLE_API_KEY) todo arranca igual: /health, /docs, usuarios, perfil, entrenos
+# y rutinas funcionan, y /chat y /hitl responden 503 explicando que falta configurar la clave.
+# Los puertos del host se pueden cambiar con API_PORT, POSTGRES_PORT, REDIS_PORT, QDRANT_PORT y
+# PHOENIX_PORT (p. ej. si ya estan ocupados).
+
+# Configuracion comun de api e init (misma imagen).
+x-coach-app: &coach-app
+  build: .
+  image: coach-gimnasio-api:0.1.0
+  # .env es opcional; COACH_ENV_FILE permite apuntar a otro archivo.
+  env_file:
+    - path: ${COACH_ENV_FILE:-.env}
+      required: false
+  # Dentro de la red de compose los servicios se alcanzan por su nombre, no por localhost:
+  # estas variables sustituyen a las del .env solo dentro del contenedor.
+  environment:
+    DATABASE_URL: postgresql+asyncpg://coach:coach@postgres:5432/coach
+    REDIS_URL: redis://redis:6379/0
+    QDRANT_URL: http://qdrant:6333
+    PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
+    CATALOGO_PATH: data/catalogo/exercises.json
+    GUIAS_DIR: data/guias
+  volumes:
+    - modelos_cache:/cache
+
 services:
-  api:
-    build: .
-    image: coach-gimnasio-api:0.1.0
-    # Mismo .env que para ejecutar en local; COACH_ENV_FILE permite apuntar a otro archivo.
-    env_file:
-      - ${COACH_ENV_FILE:-.env}
-    # Dentro de la red de compose los servicios se alcanzan por su nombre, no por localhost:
-    # estas variables sustituyen a las del .env solo dentro del contenedor.
-    environment:
-      DATABASE_URL: postgresql+asyncpg://coach:coach@postgres:5432/coach
-      REDIS_URL: redis://redis:6379/0
-      QDRANT_URL: http://qdrant:6333
-      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006/v1/traces
-      CATALOGO_PATH: data/catalogo/exercises.json
-      GUIAS_DIR: data/guias
-    ports:
-      - "8000:8000"
-    volumes:
-      - modelos_cache:/cache
+  # Tarea de una sola vez: migraciones + ingesta (idempotentes; repetirlas no duplica nada).
+  # La primera vez descarga los modelos de embeddings (cache en el volumen modelos_cache).
+  # Si la ingesta falla (p. ej. sin red para descargar los modelos) se avisa y la api arranca
+  # igual: el RAG queda vacio, pero el resto funciona. Un fallo de las migraciones si detiene.
+  init:
+    <<: *coach-app
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        (python scripts/ingerir.py ||
+        echo "AVISO: la ingesta en Qdrant fallo; la API arranca sin RAG. Reintentar con: docker compose run --rm init")
+    restart: "no"
     depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  api:
+    <<: *coach-app
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    depends_on:
+      init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -35,7 +77,7 @@ services:
       POSTGRES_PASSWORD: coach
       POSTGRES_DB: coach
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
@@ -51,7 +93,7 @@ services:
       # AOF: los checkpoints del grafo sobreviven a reinicios de Redis (el entrypoint lee REDIS_ARGS)
       REDIS_ARGS: "--appendonly yes"
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -63,10 +105,10 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.20.0
     ports:
-      - "6333:6333"
+      - "${QDRANT_PORT:-6333}:6333"
     volumes:
       # Volumen propio de la serie 1.20: el almacenamiento de qdrant v1.12 no se puede abrir con
-      # v1.20 (el servidor no arranca). El contenido es derivado: run.sh lo vuelve a ingerir.
+      # v1.20 (el servidor no arranca). El contenido es derivado: el servicio init lo vuelve a ingerir.
       - qdrant_data_v1_20:/qdrant/storage
     healthcheck:
       # la imagen de Qdrant no trae curl ni wget: se consulta /healthz con bash y /dev/tcp
@@ -80,7 +122,7 @@ services:
     environment:
       PHOENIX_WORKING_DIR: /mnt/data
     ports:
-      - "6006:6006"
+      - "${PHOENIX_PORT:-6006}:6006"
     volumes:
       - phoenix_data:/mnt/data
 

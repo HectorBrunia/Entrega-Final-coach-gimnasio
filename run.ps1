@@ -1,57 +1,58 @@
 # Levanta el coach de gimnasio con un solo comando (Windows): .\run.ps1
 #
-# 1. Comprueba que exista .env (si no, lo crea desde .env.example y se detiene).
-# 2. docker compose up -d --build (api, postgres, redis, qdrant, phoenix).
-# 3. Migraciones de Alembic e ingesta del catalogo y las guias en Qdrant (idempotente).
+# 1. Si no existe .env, lo crea desde .env.example (y sigue).
+# 2. Si faltan GOOGLE_API_KEY o GEMINI_MODEL, avisa y sigue: la API arranca sin el coach
+#    conversacional (/chat y /hitl responden 503 explicando que falta configurar).
+# 3. docker compose up -d --build: postgres, redis, qdrant, phoenix, init (migraciones de
+#    Alembic + ingesta idempotente en Qdrant) y api. Equivale a `docker compose up -d`.
 # 4. Espera a que GET /health responda 200 y muestra las URLs.
 #
 # Es seguro ejecutarlo varias veces: las migraciones y la ingesta no repiten trabajo hecho.
-# $env:COACH_ENV_FILE permite usar otro archivo de entorno en lugar de .env.
+# $env:COACH_ENV_FILE permite usar otro archivo de entorno en lugar de .env; $env:API_PORT, otro puerto.
 # 'Continue': docker escribe su progreso en stderr y con 'Stop' PowerShell 5.1 lo trataria como
 # error terminante al redirigir la salida. Cada paso comprueba $LASTEXITCODE.
 $ErrorActionPreference = 'Continue'
 Set-Location -Path $PSScriptRoot
 
 $envFile = if ($env:COACH_ENV_FILE) { $env:COACH_ENV_FILE } else { '.env' }
-$apiUrl = 'http://localhost:8000'
-$timeoutSalud = if ($env:TIMEOUT_SALUD_SEG) { [int]$env:TIMEOUT_SALUD_SEG } else { 180 }
-
-function Invoke-Paso([string]$titulo, [scriptblock]$accion) {
-    Write-Host "==> $titulo"
-    & $accion
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: fallo el paso '$titulo' (codigo $LASTEXITCODE)." -ForegroundColor Red
-        exit 1
-    }
-}
+$apiPort = if ($env:API_PORT) { $env:API_PORT } else { '8000' }
+$phoenixPort = if ($env:PHOENIX_PORT) { $env:PHOENIX_PORT } else { '6006' }
+$apiUrl = "http://localhost:$apiPort"
+$timeoutSalud = if ($env:TIMEOUT_SALUD_SEG) { [int]$env:TIMEOUT_SALUD_SEG } else { 300 }
 
 if (-not (Test-Path $envFile)) {
     if ($envFile -eq '.env') {
         Copy-Item .env.example .env
         Write-Host 'Se creo .env a partir de .env.example.'
-        Write-Host 'Completa GOOGLE_API_KEY y GEMINI_MODEL en .env y vuelve a ejecutar: .\run.ps1'
     } else {
         Write-Host "ERROR: no existe el archivo de entorno '$envFile' (COACH_ENV_FILE)." -ForegroundColor Red
-    }
-    exit 1
-}
-
-# Solo se comprueba que las variables tengan valor; nunca se muestra su contenido.
-foreach ($var in 'GOOGLE_API_KEY', 'GEMINI_MODEL') {
-    if (-not (Select-String -Path $envFile -Pattern "^\s*$var\s*=\s*[^\s#]" -Quiet)) {
-        Write-Host "ERROR: $var esta vacia en $envFile. Completala y vuelve a ejecutar: .\run.ps1" -ForegroundColor Red
         exit 1
     }
 }
 
+# Solo se comprueba que las variables tengan valor; nunca se muestra su contenido.
+$faltaLlm = $false
+foreach ($var in 'GOOGLE_API_KEY', 'GEMINI_MODEL') {
+    if (-not (Select-String -Path $envFile -Pattern "^\s*$var\s*=\s*[^\s#]" -Quiet)) {
+        $faltaLlm = $true
+    }
+}
+if ($faltaLlm) {
+    Write-Host "AVISO: GOOGLE_API_KEY o GEMINI_MODEL vacias en $envFile." -ForegroundColor Yellow
+    Write-Host '       El sistema arranca igual (salud, /docs, usuarios, perfil, entrenos y rutinas),'
+    Write-Host '       pero /chat y /hitl responderan 503 hasta que las completes y vuelvas a ejecutar run.ps1.'
+}
+
 $env:COACH_ENV_FILE = $envFile
 
-Invoke-Paso 'Construyendo y levantando los servicios (la primera vez tarda varios minutos)' {
-    docker compose up -d --build --wait --wait-timeout 300
-}
-Invoke-Paso 'Migraciones de Alembic' { docker compose exec -T api alembic upgrade head }
-Invoke-Paso 'Ingesta del catalogo y las guias en Qdrant (la primera vez descarga los modelos)' {
-    docker compose exec -T api python scripts/ingerir.py
+Write-Host '==> Construyendo y levantando los servicios (la primera vez tarda varios minutos:'
+Write-Host '    imagenes, dependencias y descarga de los modelos de embeddings en el servicio init)'
+docker compose up -d --build
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: docker compose up fallo (codigo $LASTEXITCODE). Estado y log del servicio init:" -ForegroundColor Red
+    docker compose ps -a
+    docker compose logs --tail 40 init
+    exit 1
 }
 
 Write-Host "==> Esperando a que la API responda en $apiUrl/health"
@@ -74,7 +75,7 @@ while ($true) {
             $cuerpo = ''
         }
     }
-    if ($codigo -eq 200) { break }
+    if ($codigo -eq 200) { Write-Host "Salud: $cuerpo"; break }
     if (((Get-Date) - $inicio).TotalSeconds -ge $timeoutSalud) {
         Write-Host "ERROR: /health no respondio 200 en $timeoutSalud s (ultimo codigo: $codigo)." -ForegroundColor Red
         if ($cuerpo) {
@@ -85,9 +86,9 @@ while ($true) {
                 if ($degradados) { Write-Host "Servicios degradados: $($degradados -join ', ')" }
             } catch {}
         }
-        docker compose ps
-        Write-Host 'Ultimas lineas del log de la API:'
-        docker compose logs --tail 30 api
+        docker compose ps -a
+        Write-Host 'Ultimas lineas del log de init y de la API:'
+        docker compose logs --tail 30 init api
         exit 1
     }
     Start-Sleep -Seconds 2
@@ -97,5 +98,8 @@ Write-Host ''
 Write-Host 'Coach de gimnasio listo.'
 Write-Host "  API (OpenAPI):     $apiUrl/docs"
 Write-Host "  Salud:             $apiUrl/health"
-Write-Host '  Trazas (Phoenix):  http://localhost:6006'
+Write-Host "  Trazas (Phoenix):  http://localhost:$phoenixPort"
+if ($faltaLlm) {
+    Write-Host "  Coach conversacional: SIN CONFIGURAR (completa GOOGLE_API_KEY y GEMINI_MODEL en $envFile)"
+}
 Write-Host 'Para detenerlo: docker compose stop'
