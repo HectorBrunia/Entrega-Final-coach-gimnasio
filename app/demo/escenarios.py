@@ -47,6 +47,10 @@ LINEA_FINAL_OK = "DEMO COMPLETADA: 5/5 escenarios correctos (sin Docker, sin red
 
 FUENTE = ["guia:tecnica_basica"]
 
+# Rotulos de cada respuesta del coach en la narracion.
+ORIGEN_REAL = "real"  # texto determinista del sistema real (plantillas, rutina formateada, 112)
+ORIGEN_SIMULADO = "LLM simulado"  # texto escrito por el LLM guionado
+
 
 def _dia(nombre: str, *ids: str) -> dict:
     return {"nombre": nombre, "ejercicios": [
@@ -112,11 +116,18 @@ class _Narrador:
     def usuario(self, texto: str) -> None:
         self(f"\nUsuario > {texto}")
 
-    def coach(self, texto: str) -> None:
+    def coach(self, texto: str, origen: str = ORIGEN_REAL) -> None:
+        """Respuesta al usuario. `origen` dice si el texto lo escribio el LLM simulado o si es
+        una salida determinista real (plantillas, rutina formateada, filtro, 112)."""
         lineas = texto.splitlines() or [""]
-        self(f"Coach   > {lineas[0]}")
+        prefijo = f"Coach [{origen}] > "
+        self(f"{prefijo}{lineas[0]}")
         for linea in lineas[1:]:
-            self(f"          {linea}")
+            self(f"{' ' * len(prefijo)}{linea}")
+
+    def guion(self, esquemas: list[str]) -> None:
+        if esquemas:
+            self(f"  [{ORIGEN_SIMULADO}] salidas guionadas que pidió el grafo: {', '.join(esquemas)}")
 
     def comprobar(self, descripcion: str, valor: bool) -> None:
         self.r.comprobaciones.append((descripcion, bool(valor)))
@@ -177,12 +188,17 @@ async def ejecutar_demo(escribir: Callable[[str], Any] = print) -> ResultadoDemo
     uid: UUID = await repo.crear_usuario()
     cfg = config_hilo(uid)
 
-    async def turno(mensaje: str, **guion: list) -> tuple[str, bool, dict]:
+    async def turno(mensaje: str, origen: str = ORIGEN_REAL, **guion: list) -> tuple[str, bool, dict]:
         llm.programar(**guion)
         n.usuario(mensaje)
+        previas = len(llm.llamadas)
         salida = await grafo.ainvoke({"usuario_id": uid, "mensaje": mensaje}, cfg)
+        n.guion(llm.llamadas[previas:])
         texto, pausa = _respuesta(salida)
-        n.coach(texto)
+        n.coach(texto, origen)
+        if "PlanPropuesto" in llm.llamadas[previas:] and "Tu rutina" in texto:
+            n("  (los ejercicios los propuso el LLM simulado; el formato, el catálogo y el filtro "
+              "de seguridad son reales)")
         return texto, pausa, salida
 
     async def reanudar(revision: str) -> str:
@@ -288,7 +304,7 @@ async def ejecutar_demo(escribir: Callable[[str], Any] = print) -> ResultadoDemo
     n.seccion("Escenario 5: pregunta fuera de alcance -> sin plan")
     versiones = len(repo.rutinas.get(uid, []))
     texto, pausa, _ = await turno(
-        "¿Quién ganó el Mundial de fútbol de 2022?",
+        "¿Quién ganó el Mundial de fútbol de 2022?", ORIGEN_SIMULADO,
         AnalisisMensaje=[AnalisisMensaje()],
         DecisionSupervisor=[DecisionSupervisor(destino="sintesis")],
         RespuestaConversacion=[RespuestaConversacion(

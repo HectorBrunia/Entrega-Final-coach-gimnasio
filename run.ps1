@@ -15,10 +15,35 @@ $ErrorActionPreference = 'Continue'
 Set-Location -Path $PSScriptRoot
 
 $envFile = if ($env:COACH_ENV_FILE) { $env:COACH_ENV_FILE } else { '.env' }
-$apiPort = if ($env:API_PORT) { $env:API_PORT } else { '8000' }
-$phoenixPort = if ($env:PHOENIX_PORT) { $env:PHOENIX_PORT } else { '6006' }
-$apiUrl = "http://localhost:$apiPort"
 $timeoutSalud = if ($env:TIMEOUT_SALUD_SEG) { [int]$env:TIMEOUT_SALUD_SEG } else { 300 }
+
+# Herramientas necesarias: sin Docker Compose no se puede levantar el stack con este script.
+function Salir-SinHerramienta([string]$motivo) {
+    Write-Host "ERROR: $motivo" -ForegroundColor Red
+    Write-Host "       Sin Docker puedes ver el sistema funcionando igual: README.md, seccion"
+    Write-Host "       'Guia rapida para la correccion', camino A (python scripts/demo.py y pytest)."
+    exit 1
+}
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Salir-SinHerramienta "no se encontro 'docker' en el PATH."
+}
+docker compose version *> $null
+if ($LASTEXITCODE -ne 0) { Salir-SinHerramienta "no esta disponible 'docker compose' (Compose v2)." }
+
+# Puertos: compose los interpola desde el entorno o desde el .env del proyecto; aqui se leen
+# igual para sondear el mismo puerto (el entorno tiene prioridad).
+function Leer-Puerto([string]$nombre, [string]$porDefecto) {
+    $valor = [Environment]::GetEnvironmentVariable($nombre)
+    if ($valor) { return $valor }
+    if (Test-Path .env) {
+        $coincidencia = Select-String -Path .env -Pattern "^\s*$nombre\s*=\s*(\d+)\s*(#.*)?$" | Select-Object -Last 1
+        if ($coincidencia) { return $coincidencia.Matches[0].Groups[1].Value }
+    }
+    return $porDefecto
+}
+$apiPort = Leer-Puerto 'API_PORT' '8000'
+$phoenixPort = Leer-Puerto 'PHOENIX_PORT' '6006'
+$apiUrl = "http://localhost:$apiPort"
 
 if (-not (Test-Path $envFile)) {
     if ($envFile -eq '.env') {

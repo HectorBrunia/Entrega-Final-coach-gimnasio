@@ -3,7 +3,9 @@
 import subprocess
 import sys
 
-from app.demo.escenarios import LINEA_FINAL_OK, TITULO, ejecutar_demo
+from app.demo.escenarios import (
+    LINEA_FINAL_OK, ORIGEN_REAL, ORIGEN_SIMULADO, TITULO, ejecutar_demo,
+)
 from tests.conftest import RAIZ
 
 
@@ -26,6 +28,21 @@ async def test_demo_completa_los_cinco_escenarios():
     assert "112" in r.respuestas["pecho"]
     # 5: fuera de alcance sin plan
     assert "Tu rutina" not in r.respuestas["fuera_de_alcance"]
+
+
+async def test_cada_respuesta_indica_si_es_real_o_del_llm_simulado():
+    lineas: list[str] = []
+    await ejecutar_demo(lineas.append)
+    respuestas = [l for l in lineas if l.startswith("Coach")]
+    assert respuestas and all(
+        l.startswith((f"Coach [{ORIGEN_REAL}] > ", f"Coach [{ORIGEN_SIMULADO}] > "))
+        for l in respuestas)
+    simuladas = [l for l in respuestas if l.startswith(f"Coach [{ORIGEN_SIMULADO}]")]
+    # solo la respuesta fuera de alcance es texto escrito por el LLM simulado
+    assert len(simuladas) == 1 and "fuera de lo que puedo ayudarte" in simuladas[0]
+    # el 112 es una plantilla real
+    assert any(l.startswith(f"Coach [{ORIGEN_REAL}]") and "112" in l for l in respuestas)
+    assert any(l.startswith(f"  [{ORIGEN_SIMULADO}] salidas guionadas") for l in lineas)
 
 
 def test_script_de_demo_termina_con_codigo_0():

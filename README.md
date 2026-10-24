@@ -34,13 +34,25 @@ Tres caminos, de menor a mayor requisito. Ninguno necesita tocar código. La cla
 
 ### A. Sin Docker ni clave (≈ 6-7 minutos: ~5 de instalación)
 
-Requisito: Python 3.12. Instala solo dependencias de PyPI (torch en su build CPU, desde el
-índice extra que declara `requirements.txt`), no descarga modelos ni usa la red al ejecutar.
+Requisito: Python 3.12 (la versión verificada; 3.13 no está verificada). Instala solo
+dependencias de PyPI (torch en su build CPU, desde el índice extra que declara
+`requirements.txt`); al ejecutar no descarga modelos ni usa la red.
+
+Linux / macOS:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate              # Windows (PowerShell): .venv\Scripts\Activate.ps1
-                                       # Windows (cmd):        .venv\Scripts\activate.bat
+python3 -m venv .venv                  # Debian/Ubuntu: si falla, sudo apt install python3-venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -m "not sistema and not integracion"
+python scripts/demo.py
+```
+
+Windows (PowerShell o cmd):
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\activate                 # PowerShell con política Restricted: Set-ExecutionPolicy -Scope Process Bypass
 pip install -r requirements-dev.txt
 pytest -m "not sistema and not integracion"
 python scripts/demo.py
@@ -48,12 +60,16 @@ python scripts/demo.py
 
 En Windows, clona en una ruta corta (p. ej. `C:\coach`): torch instala archivos con rutas muy
 largas y, si la compatibilidad con rutas largas de Windows está desactivada, `pip` falla con
-`OSError: [Errno 2] No such file or directory`. Ocupa unos 3 GB en disco.
+`OSError: [Errno 2] No such file or directory`. El entorno ocupa unos 3 GB en disco.
 
-Resultado esperado:
+Resultado esperado (todos los comandos con el entorno virtual activado):
 
-- `pytest`: `905 passed, 20 deselected` (≈ 1 min) (las 20 deseleccionadas son las de sistema e
-  integración, que necesitan el stack y la clave).
+- `pytest -m "not sistema and not integracion"`: `906 passed, 20 deselected` (≈ 1 min). Las 20
+  deseleccionadas son 13 de integración (necesitan Postgres/Redis del stack) y 7 de sistema
+  (necesitan el stack y la clave de Gemini).
+- `pytest` a secas: `906 passed, 13 skipped, 7 deselected` (algunos avisos de librerías son normales). Excluye por defecto las de sistema (7 deseleccionadas) y las de
+  integración se omiten solas sin los servicios (`TEST_DATABASE_URL` sin definir, Redis
+  inaccesible).
 - `python scripts/demo.py`: conversación narrada en cinco escenarios bajo el título
   «MODO DEMO — LLM simulado; la lógica del grafo, el catálogo y las reglas de seguridad son
   reales», con código de salida 0 y última línea:
@@ -61,7 +77,9 @@ Resultado esperado:
   Usa el grafo LangGraph compilado real, el catálogo real (876 ejercicios), las reglas de
   seguridad reales y el RAG sobre las guías reales en Qdrant en memoria; solo el LLM (salidas
   fijas por paso), la persistencia y los embeddings son simulados
-  ([app/demo/](app/demo/)). Escenarios: (1) onboarding en dos mensajes → rutina con ids del
+  ([app/demo/](app/demo/)). Cada respuesta va rotulada `Coach [real]` (texto determinista del
+  sistema: plantillas, rutina formateada, filtro de seguridad, 112) o `Coach [LLM simulado]`
+  (texto guionado), y cada turno lista las salidas guionadas que pidió el grafo. Escenarios: (1) onboarding en dos mensajes → rutina con ids del
   catálogo; (2) lesión de hombro → el filtro determinista retira 4 ejercicios y rechaza un
   press de hombro propuesto; (3) dolor agudo → pausa HITL → reanudación; (4) dolor en el
   pecho → plantilla de urgencia con el 112; (5) pregunta fuera de alcance → sin plan.
@@ -77,7 +95,7 @@ curl http://localhost:8000/health
 
 `docker compose up -d` construye la imagen, levanta Postgres, Redis, Qdrant y Phoenix, ejecuta
 el servicio `init` (migraciones de Alembic + ingesta del catálogo y las guías en Qdrant; la
-primera vez descarga los modelos de embeddings, ~1 GB en total con la imagen) y arranca la API
+la imagen de la API ocupa ~2,4 GB y la primera vez se descargan además ~0,5 GB de modelos de embeddings) y arranca la API
 cuando `init` termina. Respuesta esperada de `/health` (HTTP 200):
 
 ```json
@@ -91,7 +109,8 @@ cuando `init` termina. Respuesta esperada de `/health` (HTTP 200):
   `{"detail":"Falta configurar GOOGLE_API_KEY (y GEMINI_MODEL) en .env para usar el coach conversacional"}`.
 
 Si algún puerto (8000, 5432, 6379, 6333, 6006) está ocupado: `API_PORT=18000 docker compose up -d`
-(también `POSTGRES_PORT`, `REDIS_PORT`, `QDRANT_PORT`, `PHOENIX_PORT`). `run.sh` sin `.env` lo
+(también `POSTGRES_PORT`, `REDIS_PORT`, `QDRANT_PORT`, `PHOENIX_PORT`), o descomenta
+`API_PORT=...` en `.env` (lo leen compose y `run.sh`/`run.ps1`). `run.sh` sin `.env` lo
 copia desde `.env.example`, avisa de que falta la clave y sigue. Para detener y borrar todo:
 `docker compose down -v`.
 
@@ -99,7 +118,7 @@ copia desde `.env.example`, avisa de que falta la clave y sigue. Para detener y 
 
 ```bash
 cp .env.example .env                   # Windows: copy .env.example .env
-# editar .env: GOOGLE_API_KEY=<tu clave de Google AI Studio> y GEMINI_MODEL=<modelo, p. ej. gemini-2.5-flash-lite>
+# editar .env: GOOGLE_API_KEY=<tu clave de Google AI Studio> y GEMINI_MODEL=gemini-3.5-flash-lite
 bash run.sh                            # o: docker compose up -d   (si ya estaba levantado, recrea la api con la clave)
 curl http://localhost:8000/health      # ... "llm":"configurado"
 ```
@@ -211,7 +230,7 @@ un aviso en el log. Así el filtro por equipo del programador acota de verdad lo
 ### Elección del modelo
 
 `GEMINI_MODEL` es configurable. Se recomienda un modelo *flash-lite* (por ejemplo
-`gemini-2.5-flash-lite`) por los límites del plan gratuito; comprueba en Google AI Studio qué
+`gemini-3.5-flash-lite`, el usado en las pruebas de sistema) por los límites del plan gratuito; comprueba en Google AI Studio qué
 modelos tiene disponibles tu clave. `GEMINI_RPM` (14 por defecto) limita las peticiones por
 minuto. Ante errores transitorios del proveedor (HTTP 429 y 5xx como 503 UNAVAILABLE) la
 llamada se reintenta con espera exponencial ([app/llm.py](app/llm.py)); `LLM_REINTENTOS` (3),
@@ -409,12 +428,16 @@ no tiene configurado el precio de Gemini.
 
 ## Pruebas
 
-Instalación local (Python 3.12 o superior):
+Instalación local (Python 3.12, la versión verificada; ver la
+[Guía rápida para la corrección](#guía-rápida-para-la-corrección) para Windows). Todos los
+comandos `pytest` de esta sección suponen el entorno virtual activado:
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt   # Windows: .venv\Scripts\pip install -r requirements-dev.txt
-pytest -m "not sistema and not integracion"      # unitarias, sin servicios ni clave
+python3 -m venv .venv
+source .venv/bin/activate                         # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+pytest -m "not sistema and not integracion"       # unitarias, sin servicios ni clave
+pytest                                            # además intenta las de integración (se omiten sin servicios)
 ```
 
 Las pruebas de integración de repositorios necesitan `TEST_DATABASE_URL` (una base cuyo nombre

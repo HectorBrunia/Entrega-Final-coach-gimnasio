@@ -15,8 +15,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ENV_FILE="${COACH_ENV_FILE:-.env}"
-API_URL="http://localhost:${API_PORT:-8000}"
 TIMEOUT_SALUD_SEG="${TIMEOUT_SALUD_SEG:-300}"
+
+# Herramientas necesarias: sin ellas no se puede levantar el stack con este script.
+falta_herramienta() {
+  echo "ERROR: $1" >&2
+  echo "       Sin Docker puedes ver el sistema funcionando igual: README.md, seccion" >&2
+  echo "       'Guia rapida para la correccion', camino A (python scripts/demo.py y pytest)." >&2
+  exit 1
+}
+command -v docker >/dev/null 2>&1 || falta_herramienta "no se encontro 'docker' en el PATH."
+docker compose version >/dev/null 2>&1 || falta_herramienta "no esta disponible 'docker compose' (Compose v2)."
+command -v curl >/dev/null 2>&1 || falta_herramienta "no se encontro 'curl' en el PATH (se usa para esperar a /health)."
 
 if [ ! -f "$ENV_FILE" ]; then
   if [ "$ENV_FILE" = ".env" ]; then
@@ -42,6 +52,16 @@ if [ "$falta_llm" = "1" ]; then
 fi
 
 export COACH_ENV_FILE="$ENV_FILE"
+
+# Puertos: compose los interpola desde el entorno o desde el .env del proyecto; aqui se leen
+# igual para sondear el mismo puerto (el entorno tiene prioridad).
+valor_en_env() {
+  [ -f .env ] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([0-9][0-9]*\)[[:space:]]*\(#.*\)\{0,1\}$/\1/p" .env | tr -d '\r' | tail -n 1
+}
+API_PORT="${API_PORT:-$(valor_en_env API_PORT)}"
+PHOENIX_PORT="${PHOENIX_PORT:-$(valor_en_env PHOENIX_PORT)}"
+API_URL="http://localhost:${API_PORT:-8000}"
 
 echo "==> Construyendo y levantando los servicios (la primera vez tarda varios minutos:"
 echo "    imagenes, dependencias y descarga de los modelos de embeddings en el servicio init)"
