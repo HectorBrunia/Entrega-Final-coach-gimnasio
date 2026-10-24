@@ -1,0 +1,4 @@
+# Dependencias de desarrollo y pruebas: las de ejecucion mas las de pyproject.toml [dev].
+-r requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0

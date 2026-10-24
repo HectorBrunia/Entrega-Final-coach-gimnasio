@@ -1,0 +1,32 @@
+# Dependencias de ejecucion con versiones exactas (las mismas que pyproject.toml; una prueba
+# comprueba que no se desalineen: tests/test_requisitos.py).
+#
+# torch en su build CPU: sentence-transformers lo necesita y en Linux la build por defecto de
+# PyPI trae CUDA (varios GB). Con este indice extra pip elige 2.14.0+cpu en Linux y Windows; en
+# macOS las ruedas de PyPI ya son CPU. El pin va sin sufijo local (+cpu) para que funcione en
+# todas las plataformas: un `==2.14.0` acepta tambien `2.14.0+cpu` (PEP 440).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+
+fastapi==0.160.0
+uvicorn==0.54.0
+pydantic==2.13.4
+pydantic-settings==2.15.0
+langgraph==1.2.16
+langgraph-checkpoint==4.3.0
+langgraph-checkpoint-redis==0.5.2
+langchain-core==1.6.3
+langchain-google-genai==4.4.0
+sqlalchemy[asyncio]==2.1.1
+asyncpg==0.32.0
+alembic==1.20.1
+qdrant-client==1.20.0
+sentence-transformers==6.1.0
+fastembed==0.9.0
+httpx==0.28.1
+redis==8.1.0
+arize-phoenix-otel==0.17.2
+openinference-instrumentation==0.1.71
+openinference-instrumentation-langchain==0.1.79
+opentelemetry-sdk==1.45.1
+orjson==3.12.0

@@ -1,4 +1,5 @@
-# API del coach de gimnasio (FastAPI + LangGraph). Se usa desde docker-compose.yml (servicio api).
+# API del coach de gimnasio (FastAPI + LangGraph). Se usa desde docker-compose.yml (servicios
+# api e init: init aplica las migraciones e ingiere el corpus antes de que arranque la api).
 FROM python:3.12.13-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,16 +12,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv/coach
 
-# 1) Dependencias (capa cacheada mientras pyproject.toml no cambie).
-#    torch en su build CPU: sentence-transformers lo necesita y la build por defecto trae CUDA (varios GB).
-COPY pyproject.toml ./
-RUN mkdir app && touch app/__init__.py \
-    && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.0 \
-    && pip install . \
-    && pip uninstall -y coach-gimnasio \
-    && rm -rf app build *.egg-info
+# 1) Dependencias (capa cacheada mientras requirements.txt no cambie). requirements.txt fija
+#    las mismas versiones que pyproject.toml y torch en su build CPU (indice extra de PyTorch):
+#    la build por defecto de Linux trae CUDA (varios GB).
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
 
 # 2) Codigo de la aplicacion, migraciones, scripts y datos (catalogo y guias)
+COPY pyproject.toml ./
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./
