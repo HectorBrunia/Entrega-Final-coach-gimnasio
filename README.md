@@ -280,6 +280,31 @@ mismo `thread_id` para correlacionarlos (`docker compose logs api`).
 `python scripts/verificar_trazas.py` (desde el host) genera una traza con un LLM simulado y
 comprueba en Phoenix que llegó.
 
+### Evidencia: trazas de las pruebas de sistema
+
+Capturas del dashboard de Phoenix tomadas tras ejecutar `pytest tests/sistema -m sistema` contra
+Gemini real. Cada prueba envuelve sus llamadas en un span raíz `sistema.<escenario>` con los
+atributos `escenario` y `tipo_prueba`, así que su árbol completo (API → LangGraph → nodos →
+llamadas al LLM con sus tokens) se ve en una sola traza.
+
+| Captura | Escenario que prueba |
+|---|---|
+| [Proyecto](docs/evidencia/00-proyecto-trazas.png) | Vista general del proyecto: total de trazas, tokens y latencias P50/P99 |
+| [Onboarding en un mensaje](docs/evidencia/01-onboarding-completo.png) | Perfil completo en un mensaje y rutina validada |
+| [Onboarding en dos mensajes](docs/evidencia/02-onboarding-dos-mensajes.png) | Perfil repartido en dos mensajes: plantilla fija de datos faltantes y, en el segundo, la rutina validada |
+| [Ajuste semanal](docs/evidencia/03-ajuste-semanal.png) | Entrenos registrados y ajuste de la progresión citando guías |
+| [Lesión activa](docs/evidencia/04-lesion-activa.png) | Lesión de hombro activa: ningún ejercicio bloqueado en la rutina guardada |
+| [Dolor agudo](docs/evidencia/05-dolor-agudo.png) | Dolor agudo: pausa HITL y reanudación por `/hitl/{thread_id}/reanudar` |
+| [Lesión nueva](docs/evidencia/06-lesion-nueva.png) | Lesión reportada a mitad de conversación: se retiran sus ejercicios de la rutina guardada |
+| [Fuera de alcance](docs/evidencia/07-fuera-de-alcance.png) | Pregunta fuera de alcance: rechazo sin plan |
+
+Algunas trazas figuran con estado `ERROR` porque las pruebas comprueban a propósito respuestas
+4xx esperadas: el `GET` del perfil devuelve 404 mientras el perfil está incompleto y el de la
+rutina devuelve 409 durante una pausa HITL. Son comportamientos correctos, no fallos.
+
+Phoenix registra los tokens de cada llamada al LLM (columna *total tokens*), pero no el costo:
+no tiene configurado el precio de Gemini.
+
 ## Pruebas
 
 Instalación local (Python 3.12 o superior):
