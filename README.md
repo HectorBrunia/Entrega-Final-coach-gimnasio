@@ -8,7 +8,9 @@ pausa la conversación para revisión humana: el LLM nunca es la última línea 
 Programador arma las rutinas con un RAG híbrido (denso + BM25) sobre Qdrant, con fusión RRF en
 el servidor. Postgres guarda los datos de dominio (perfiles, lesiones, entrenos, rutinas
 versionadas) y Redis guarda el estado de la conversación como checkpointer del grafo; cada
-petición deja su traza en Phoenix. Todo se levanta con un comando (`bash run.sh` o `run.ps1`).
+petición deja su traza en Phoenix. Todo se levanta con un comando (`docker compose up -d`,
+`bash run.sh` o `run.ps1`), incluso sin `.env` ni clave; y `python scripts/demo.py` muestra el
+grafo funcionando sin Docker (ver [Guía rápida para la corrección](#guía-rápida-para-la-corrección)).
 
 Coach de entrenamiento conversacional. A través de una API HTTP:
 
@@ -24,13 +26,107 @@ Coach de entrenamiento conversacional. A través de una API HTTP:
 
 No incluye interfaz gráfica: se usa desde la documentación OpenAPI (`/docs`) o cualquier cliente HTTP.
 
-## Arranque en un comando
+## Guía rápida para la corrección
 
-Requisitos: Docker con Docker Compose v2 y una API key de Google AI Studio (Gemini). En Linux o
-macOS hace falta `curl`; en Windows basta PowerShell (o Git Bash para `run.sh`).
+Tres caminos, de menor a mayor requisito. Ninguno necesita tocar código. La clave de Gemini
+**no** está en el repositorio: sin ella todo arranca y solo el coach conversacional responde
+503 explicando qué falta configurar.
+
+### A. Sin Docker ni clave (≈ 6-7 minutos: ~5 de instalación)
+
+Requisito: Python 3.12. Instala solo dependencias de PyPI (torch en su build CPU, desde el
+índice extra que declara `requirements.txt`), no descarga modelos ni usa la red al ejecutar.
 
 ```bash
-bash run.sh          # Linux, macOS o Git Bash
+python -m venv .venv
+source .venv/bin/activate              # Windows (PowerShell): .venv\Scripts\Activate.ps1
+                                       # Windows (cmd):        .venv\Scripts\activate.bat
+pip install -r requirements-dev.txt
+pytest -m "not sistema and not integracion"
+python scripts/demo.py
+```
+
+En Windows, clona en una ruta corta (p. ej. `C:\coach`): torch instala archivos con rutas muy
+largas y, si la compatibilidad con rutas largas de Windows está desactivada, `pip` falla con
+`OSError: [Errno 2] No such file or directory`. Ocupa unos 3 GB en disco.
+
+Resultado esperado:
+
+- `pytest`: `905 passed, 20 deselected` (≈ 1 min) (las 20 deseleccionadas son las de sistema e
+  integración, que necesitan el stack y la clave).
+- `python scripts/demo.py`: conversación narrada en cinco escenarios bajo el título
+  «MODO DEMO — LLM simulado; la lógica del grafo, el catálogo y las reglas de seguridad son
+  reales», con código de salida 0 y última línea:
+  `DEMO COMPLETADA: 5/5 escenarios correctos (sin Docker, sin red y sin clave de Gemini)`.
+  Usa el grafo LangGraph compilado real, el catálogo real (876 ejercicios), las reglas de
+  seguridad reales y el RAG sobre las guías reales en Qdrant en memoria; solo el LLM (salidas
+  fijas por paso), la persistencia y los embeddings son simulados
+  ([app/demo/](app/demo/)). Escenarios: (1) onboarding en dos mensajes → rutina con ids del
+  catálogo; (2) lesión de hombro → el filtro determinista retira 4 ejercicios y rechaza un
+  press de hombro propuesto; (3) dolor agudo → pausa HITL → reanudación; (4) dolor en el
+  pecho → plantilla de urgencia con el 112; (5) pregunta fuera de alcance → sin plan.
+
+### B. Con Docker, sin clave (≈ 8-10 minutos la primera vez; después ≈ 1-2 minutos)
+
+Requisito: Docker con Compose v2.24 o superior. No hace falta `.env`.
+
+```bash
+docker compose up -d                   # o: bash run.sh   /   powershell -ExecutionPolicy Bypass -File .\run.ps1
+curl http://localhost:8000/health
+```
+
+`docker compose up -d` construye la imagen, levanta Postgres, Redis, Qdrant y Phoenix, ejecuta
+el servicio `init` (migraciones de Alembic + ingesta del catálogo y las guías en Qdrant; la
+primera vez descarga los modelos de embeddings, ~1 GB en total con la imagen) y arranca la API
+cuando `init` termina. Respuesta esperada de `/health` (HTTP 200):
+
+```json
+{"status":"ok","servicios":{"postgres":"ok","redis":"ok","qdrant":"ok"},"llm":"no_configurado"}
+```
+
+- http://localhost:8000/docs abre la documentación OpenAPI.
+- `curl -X POST http://localhost:8000/usuarios` → 201 `{"id":"<uuid>"}`; perfil, entrenos y
+  rutina responden con normalidad.
+- `POST /chat` (y `/hitl/{id}/reanudar`) → 503
+  `{"detail":"Falta configurar GOOGLE_API_KEY (y GEMINI_MODEL) en .env para usar el coach conversacional"}`.
+
+Si algún puerto (8000, 5432, 6379, 6333, 6006) está ocupado: `API_PORT=18000 docker compose up -d`
+(también `POSTGRES_PORT`, `REDIS_PORT`, `QDRANT_PORT`, `PHOENIX_PORT`). `run.sh` sin `.env` lo
+copia desde `.env.example`, avisa de que falta la clave y sigue. Para detener y borrar todo:
+`docker compose down -v`.
+
+### C. Con Docker y clave de Gemini (flujo completo)
+
+```bash
+cp .env.example .env                   # Windows: copy .env.example .env
+# editar .env: GOOGLE_API_KEY=<tu clave de Google AI Studio> y GEMINI_MODEL=<modelo, p. ej. gemini-2.5-flash-lite>
+bash run.sh                            # o: docker compose up -d   (si ya estaba levantado, recrea la api con la clave)
+curl http://localhost:8000/health      # ... "llm":"configurado"
+```
+
+Flujo conversacional (detalle en [Ejemplo de uso](#ejemplo-de-uso)): `POST /usuarios`, luego
+`POST /chat` con `{"usuario_id": "<uuid>", "mensaje": "Tengo 3 días, mancuernas y barra, quiero
+ganar fuerza; soy principiante"}` → rutina validada con ejercicios del catálogo y el aviso
+médico. Pruebas de sistema contra el stack y Gemini reales (consumen cuota):
+
+```bash
+export TEST_DATABASE_URL=postgresql+asyncpg://coach:coach@localhost:5432/coach_test
+pytest tests/sistema -m sistema -v
+```
+
+La evidencia de esas pruebas (capturas de las trazas en Phoenix) está en
+[docs/evidencia/](docs/evidencia/) y se describe en
+[Evidencia: trazas de las pruebas de sistema](#evidencia-trazas-de-las-pruebas-de-sistema).
+
+## Arranque en un comando
+
+Requisitos: Docker con Docker Compose v2.24 o superior. La API key de Google AI Studio (Gemini)
+es opcional para arrancar (sin ella `/chat` y `/hitl` responden 503 explicando qué falta). Para
+`run.sh` en Linux o macOS hace falta `curl`; en Windows basta PowerShell (o Git Bash).
+
+```bash
+docker compose up -d   # cualquier sistema; con o sin .env
+bash run.sh            # Linux, macOS o Git Bash: lo mismo y además espera a /health
 ```
 
 ```powershell
@@ -39,20 +135,25 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1    # Windows PowerShell
 
 En Windows la política de ejecución por defecto (`Restricted`) impide lanzar `.\run.ps1`
 directamente; el comando de arriba la omite solo para ese proceso, sin cambiar la
-configuración del sistema. Desde Git Bash también sirve `bash run.sh`.
+configuración del sistema.
 
-La primera ejecución copia `.env.example` a `.env` y se detiene: completa `GOOGLE_API_KEY` y
-`GEMINI_MODEL` en `.env` y vuelve a ejecutar el mismo comando. Después el script:
+`docker compose up -d` basta desde un clon limpio:
 
-1. `docker compose up -d --build --wait`: construye la imagen de la API y levanta `api`,
-   `postgres`, `redis`, `qdrant` y `phoenix`. La API arranca cuando Postgres, Redis y Qdrant
-   pasan su healthcheck.
-2. `alembic upgrade head` dentro del contenedor `api`.
-3. `python scripts/ingerir.py` dentro del contenedor `api`: ingiere el catálogo y las guías en
-   Qdrant. La primera vez descarga los modelos de embeddings (quedan en el volumen
-   `modelos_cache`).
-4. Espera a que `GET /health` responda 200 (180 s como máximo; si no, muestra qué servicio está
-   degradado y el final del log de la API).
+1. Construye la imagen de la API (dependencias de `requirements.txt`, torch CPU) y levanta
+   `postgres`, `redis`, `qdrant` y `phoenix`; los tres primeros con healthcheck.
+2. Ejecuta el servicio de una sola vez `init` (misma imagen): `alembic upgrade head` y
+   `python scripts/ingerir.py`, que ingiere el catálogo y las guías en Qdrant (idempotente). La
+   primera vez descarga los modelos de embeddings (quedan en el volumen `modelos_cache`). Si la
+   ingesta fallara (p. ej. sin red), lo avisa en su log y la API arranca igual sin RAG; se
+   reintenta con `docker compose run --rm init`. Un fallo de las migraciones sí detiene el arranque.
+3. Arranca `api` cuando `init` terminó bien (`service_completed_successfully`).
+
+`.env` es opcional (`env_file` con `required: false`): todo lo que no es secreto tiene valor por
+defecto. `run.sh` / `run.ps1` hacen lo mismo y además: si no existe `.env` lo copian desde
+`.env.example`; si faltan `GOOGLE_API_KEY` o `GEMINI_MODEL` muestran un aviso y continúan; y
+esperan a que `GET /health` responda 200 (300 s como máximo; si no, muestran qué servicio está
+degradado y el final de los logs de `init` y `api`). Con la clave ya configurada, vuelve a
+ejecutar el mismo comando para recrear la API con ella.
 
 Al terminar:
 
@@ -62,20 +163,21 @@ Al terminar:
 | Salud | http://localhost:8000/health |
 | Phoenix (trazas) | http://localhost:6006 |
 
-Volver a ejecutar el script es seguro: las migraciones ya aplicadas no se repiten y la ingesta
+Volver a ejecutar el comando es seguro: las migraciones ya aplicadas no se repiten y la ingesta
 no recodifica nada si el corpus no cambió. Para detener los servicios: `docker compose stop`.
 
 Qdrant usa la imagen `v1.20.0` (alineada con `qdrant-client` 1.20.0) y el volumen
 `qdrant_data_v1_20`. El almacenamiento de versiones anteriores (`v1.12.4`, volumen
 `qdrant_data`) no se puede abrir con `v1.20`, así que no se reutiliza. Su contenido es
-derivado: el script vuelve a crear la colección y la ingiere. Si te quedó el volumen
+derivado: el servicio `init` vuelve a crear la colección y la ingiere. Si te quedó el volumen
 antiguo, puedes borrarlo a mano cuando quieras con
 `docker volume rm coach-gimnasio_qdrant_data`.
 
 El mismo `.env` sirve para el compose y para ejecutar en local: dentro del contenedor `api`,
 `docker-compose.yml` sustituye las URLs de `localhost` por los nombres de los servicios
 (`postgres`, `redis`, `qdrant`, `phoenix`). La variable `COACH_ENV_FILE` permite usar otro
-archivo de entorno en lugar de `.env`.
+archivo de entorno en lugar de `.env`, y `API_PORT`, `POSTGRES_PORT`, `REDIS_PORT`,
+`QDRANT_PORT` y `PHOENIX_PORT` cambian los puertos del host.
 
 ### Ejemplo de uso
 
@@ -311,8 +413,8 @@ Instalación local (Python 3.12 o superior):
 
 ```bash
 python -m venv .venv
-.venv/bin/pip install -e ".[dev]"      # Windows: .venv\Scripts\pip install -e ".[dev]"
-pytest                                  # unitarias; excluye las de sistema
+.venv/bin/pip install -r requirements-dev.txt   # Windows: .venv\Scripts\pip install -r requirements-dev.txt
+pytest -m "not sistema and not integracion"      # unitarias, sin servicios ni clave
 ```
 
 Las pruebas de integración de repositorios necesitan `TEST_DATABASE_URL` (una base cuyo nombre
