@@ -108,6 +108,11 @@ def documentos_desde_guias(directorio: Path) -> list[Documento]:
     return docs
 
 
+def fuentes_de_guias(directorio: Path) -> frozenset[str]:
+    """Fuentes canonicas ("guia:<nombre>") de las guias `*.md` del directorio."""
+    return frozenset(f"{PREFIJO_FUENTE_GUIA}{ruta.stem}" for ruta in Path(directorio).glob("*.md"))
+
+
 class ColeccionIncompatible(RuntimeError):
     """La coleccion existente no tiene la configuracion de vectores esperada."""
 

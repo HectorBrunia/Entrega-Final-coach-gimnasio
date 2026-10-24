@@ -28,7 +28,10 @@ from app.agentes.estado import (
 )
 from app.llm import LLMNoDisponible
 from app.domain.equipo import EQUIPO_SIEMPRE_DISPONIBLE, describir_equipo, normalizar_equipo
-from app.domain.modelos import DiaRutina, Ejercicio, Lesion, Perfil, PerfilBorrador, Rutina
+from app.domain.modelos import (
+    DiaRutina, Ejercicio, EjercicioPlanificado, Lesion, Perfil, PerfilBorrador, Rutina,
+    nombre_dia_valido, repeticiones_validas,
+)
 from app.herramientas.esquemas import EntradaVolumen
 from app.herramientas.funciones import (
     EjercicioDesconocido,
@@ -274,19 +277,43 @@ _ENCABEZADO_DIA = re.compile(
 # Vineta: 1-4 simbolos (guion, asterisco, emoji, ✅...) o un numero con punto/parentesis.
 _VINETA = re.compile(r"^\s*(?:[^\w\s]{1,4}|\d+\s*[.)-])\s*\w")
 _LISTA_EN_LINEA = re.compile(r"(?:^|\s)\d+\s*[.)]\s+\w")
-_NOMBRE_EJERCICIO = re.compile(
-    r"\b(?:press|sentadill\w*|squat\w*|peso muerto|deadlift\w*|remo\w*|rows?|dominad\w*|"
+_EJERCICIOS = (
+    r"(?:press|sentadill\w*|squat\w*|peso muerto|deadlift\w*|remo\w*|rows?|dominad\w*|"
     r"pull ?ups?|chin ?ups?|jalon\w*|curl\w*|extension\w*|zancad\w*|lunges?|hip thrust\w*|"
     r"fondos|dips?|elevacion\w*|aperturas?|flexion\w*|push ?ups?|plancha\w*|planks?|prensa|"
     r"gemelos?|triceps|biceps|burpees?|crunch\w*|abdominal\w*|face ?pull|swing\w*|"
     r"thrusters?|kettlebells?|step ?ups?|bulgar\w*|goblet|romanian|rumano|puente de gluteo\w*|"
     r"glute bridge|cargada\w*|arranque|clean|snatch|box jumps?|saltos? al cajon|wall balls?|"
-    r"mountain climbers?|escalador\w*|jumping jacks?|pullover|pec deck|hack)\b"
+    r"mountain climbers?|escalador\w*|jumping jacks?|pullover|pec deck|hack|patada\w*)"
+)
+_NOMBRE_EJERCICIO = re.compile(rf"\b{_EJERCICIOS}\b")
+_CARDIO = r"(?:cinta|bici\w*|eliptica|remo|comba|cardio|carrera|correr|nadar|natacion|spinning|escaladora)"
+# Patrones de una sola linea sin necesitar nombre de ejercicio (ronda 2).
+_PRESCRIPCION_EXTRA = re.compile(
+    r"\btandas?\b"
+    r"|\b\d+\s*por\s*\d+\b"                                     # 4 por 10
+    r"|\b\d+\s*/\s*\d+\b"                                       # 4/8
+    r"|\ba\s+\d+\s*-\s*\d+\b"                                   # a 8-10
+    r"|\b\d+\s*(?:s|seg\w*|segundos?)\b.*\b(?:descans\w*|off|pausa|recupera\w*)\b"
+    r"|\bon\b.*\boff\b"                                         # 30 s on / 30 s off
+    rf"|\b\d+\s*min\w*\s+de\s+{_CARDIO}\b"                       # 10 minutos de cinta
+    r"|(?:^|[\s.;,])(?:upper|lower|torso|pierna|piernas|empuje|tiron|push|pull|legs|full ?body"
+    r"|cuerpo completo|tren superior|tren inferior)\s*:"           # Upper: / Empuje:
+    r"|\b(?:primer[ao]?|segund[ao]|tercer[ao]?|cuart[ao])\s+(?:sesion|dia|semana|entreno|rutina)\s*:"
+)
+# Patrones que solo cuentan si la linea nombra un ejercicio.
+_PRESCRIPCION_CON_EJERCICIO = re.compile(
+    rf"\b{_NUM}\s+{_EJERCICIOS}\b"                                # 50 flexiones
+    r"|\b\d+\s+de\s+\d+\b"                                       # 5 de 5
+    r"|\b(?:sube|subir|baja|bajar|pon|usa|carga|mete)\s+(?:a\s+|unos?\s+|hasta\s+)?\d+(?:[.,]\d+)?\b"
+    r"|\b(?:haz|hazlo|realiza|recomiendo|sugiero|prueba|incluye|anade|agrega|prioriza)\b"
 )
 # Indicacion o calendario junto a varios ejercicios en prosa ("haz sentadilla y press...").
 _INDICACION = re.compile(
     r"\b(?:haz|hazlo|haga|realiza|incluye|anade|agrega|empieza|comienza|prueba|alterna|combina|"
-    r"recomiendo|propongo|deberias|puedes hacer|por semana|primer dia|segundo dia|"
+    r"recomiendo|propongo|sugiero|sugerencia|te dejo|idea|manana|deberias|puedes hacer|"
+    r"por semana|primer dia|segundo dia|para (?:gluteos?|pecho|espalda|piernas?|hombros?|"
+    r"brazos|biceps|triceps|core|abdomen)|"
     rf"{_DIAS_SEMANA})\b"
 )
 MIN_VINETAS_EJERCICIO = 2
@@ -501,7 +528,10 @@ def parece_prescripcion(texto: str) -> bool:
     o 3+ lineas de lista que nombran ejercicios). Criterio amplio a proposito: ante la duda,
     el texto se sustituye por un mensaje fijo."""
     lineas = [_normalizar(l) for l in texto.splitlines()]
-    if any(_PRESCRIPCION.search(l) or _ENCABEZADO_DIA.search(l) for l in lineas):
+    if any(_PRESCRIPCION.search(l) or _PRESCRIPCION_EXTRA.search(l) or _ENCABEZADO_DIA.search(l)
+           for l in lineas):
+        return True
+    if any(_PRESCRIPCION_CON_EJERCICIO.search(l) and _NOMBRE_EJERCICIO.search(l) for l in lineas):
         return True
     if any(len(_LISTA_EN_LINEA.findall(l)) >= 2 and _NOMBRE_EJERCICIO.search(l) for l in lineas):
         return True  # 1. Bulgaras 2. Goblet 3. Romanian
@@ -513,7 +543,38 @@ def parece_prescripcion(texto: str) -> bool:
     return len(nombres) >= MIN_EJERCICIOS_EN_PROSA and bool(_INDICACION.search(todo))
 
 
-_ID_FUENTE = re.compile(r"^[\w.#:/-]{1,100}$")
+_PREFIJO_GUIA_LIBRE = re.compile(r"^gu[ií]a[\s:_-]*", re.IGNORECASE)
+
+
+def normalizar_fuentes(fuentes: list[str], guias: frozenset[str]) -> list[str]:
+    """Lleva cada fuente citada por el LLM a una fuente canonica de guia ("guia:<nombre>") de
+    las guias cargadas: canonica tal cual; id de trozo "<nombre>#<seccion>" -> su guia; nombre
+    suelto ("progresion", "guia progresion") -> su guia. Lo que no corresponde a ninguna guia
+    real se descarta (y se registra). Sin duplicados, en orden."""
+    resultado: list[str] = []
+    for fuente in fuentes:
+        bruto = (fuente or "").strip()
+        nombre = bruto.split("#", 1)[0].strip()
+        candidatos = [nombre, _PREFIJO_GUIA_LIBRE.sub("", nombre).strip()]
+        canonica = next((f"guia:{c}" for c in candidatos if c and f"guia:{c}" in guias), None)
+        if canonica is None:
+            if bruto:
+                logger.info("Fuente descartada (no es una guia cargada): %r", bruto[:100])
+            continue
+        if canonica not in resultado:
+            resultado.append(canonica)
+    return resultado
+
+
+def _con_fuentes_canonicas(dias: list[DiaRutina], guias: frozenset[str]) -> list[DiaRutina]:
+    """Dias del dominio (no los modelos de propuesta) con las fuentes normalizadas."""
+    return [
+        DiaRutina(nombre=d.nombre, ejercicios=[
+            EjercicioPlanificado(**{**p.model_dump(), "fuentes": normalizar_fuentes(p.fuentes, guias)})
+            for p in d.ejercicios
+        ])
+        for d in dias
+    ]
 MAX_OBJETIVO_MOSTRADO = 80
 
 
@@ -582,8 +643,11 @@ class Nodos:
         llm: BaseChatModel,
         buscador: Buscador,
         indice: IndiceBloqueo | None = None,
+        fuentes_guia: frozenset[str] = frozenset(),
     ):
         self.repo = repo
+        # fuentes canonicas ("guia:<nombre>") de las guias cargadas: las unicas citables
+        self.fuentes_guia = frozenset(fuentes_guia)
         self.catalogo = catalogo
         # zona -> ids bloqueados, precalculado una vez: el filtro en cada turno son busquedas
         # en conjuntos y no bloquea el event loop
@@ -1006,10 +1070,19 @@ class Nodos:
             documentos = []
 
         candidatos = self._candidatos(perfil, permitidos.permitidos, excluidos, documentos)
-        plan = await self._planificar.ainvoke(
-            self._prompt_programador(estado, perfil, candidatos, documentos, previos, contexto_extra)
-        )
-        rutina = Rutina(usuario_id=estado["usuario_id"], version=1, dias=plan.dias) if plan else None
+        try:
+            plan = await self._planificar.ainvoke(
+                self._prompt_programador(estado, perfil, candidatos, documentos, previos, contexto_extra)
+            )
+        except ValueError:
+            # propuesta con forma invalida (ValidationError / OutputParserException): el plan se
+            # rechaza y nunca se muestra; el turno responde MSG_FALLO_PLAN
+            logger.warning("Propuesta del programador invalida: se rechaza", exc_info=True)
+            plan = None
+        rutina = Rutina(
+            usuario_id=estado["usuario_id"], version=1,
+            dias=_con_fuentes_canonicas(plan.dias, self.fuentes_guia),
+        ) if plan else None
         if not _tiene_ejercicios(rutina):
             return {**base, "rutina": None, "fallo_plan": True}
         return {**base, "rutina": rutina, "rutina_nueva": True, "plan_validado": False,
@@ -1055,7 +1128,11 @@ class Nodos:
             "Eres el programador de rutinas de un coach de gimnasio. Arma una rutina con "
             f"exactamente {perfil.dias_disponibles} dias para el objetivo '{perfil.objetivo}', "
             f"nivel {perfil.nivel.value}. Usa SOLO ejercicio_id de esta lista:\n{lista}\n"
-            "En 'fuentes' de cada ejercicio cita los ids de las guias usadas.\n"
+            "En 'fuentes' de cada ejercicio cita las guias usadas, solo con estas fuentes: "
+            f"{', '.join(sorted(self.fuentes_guia)) or 'ninguna'}.\n"
+            "Cada 'repeticiones' es un numero o un rango N-M (p. ej. 8 o 8-10). Cada 'nombre' "
+            "de dia es corto (maximo 40 caracteres, una linea), p. ej. 'Día 1 - Torso', sin "
+            "series, cargas ni indicaciones.\n"
             f"Guias:\n{guias or 'ninguna'}"
         )
         if previos:
@@ -1175,15 +1252,16 @@ class Nodos:
             )
         lineas.append(f"Tu rutina (versión {rutina.version}):")
         fuentes: list[str] = []
-        for dia in rutina.dias:
-            lineas.append(f"\n{dia.nombre}")
+        for n, dia in enumerate(rutina.dias, 1):
+            # los campos que se muestran tal cual se sanean (rutinas guardadas antes de validar)
+            lineas.append(f"\n{dia.nombre if nombre_dia_valido(dia.nombre) else f'Día {n}'}")
             for p in dia.ejercicios:
-                lineas.append(
-                    f"- {self._nombre(p.ejercicio_id)}: {p.series} x {p.repeticiones}, "
-                    f"descanso {p.descanso_seg} s"
-                )
-                # solo ids de fuente (sin espacios): el LLM no puede colar frases por aqui
-                fuentes.extend(f for f in p.fuentes if _ID_FUENTE.match(f) and f not in fuentes)
+                dosis = (f"{p.series} x {p.repeticiones}" if repeticiones_validas(p.repeticiones)
+                         else f"{p.series} series")
+                lineas.append(f"- {self._nombre(p.ejercicio_id)}: {dosis}, descanso {p.descanso_seg} s")
+                # solo fuentes canonicas de guias cargadas
+                fuentes.extend(f for f in normalizar_fuentes(p.fuentes, self.fuentes_guia)
+                               if f not in fuentes)
         volumen = estado.get("volumen")
         if volumen:
             resumen = ", ".join(

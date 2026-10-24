@@ -136,7 +136,7 @@ async def test_la_rutina_formateada_no_contiene_texto_del_llm(settings, destino)
     if destino == "progreso":
         await repo.guardar_rutina(Rutina(usuario_id=usuario, version=1, dias=_dias("sentadilla")))
     dias = _dias("sentadilla", "press_banca")
-    dias[0].ejercicios[0].fuentes = ["guia_hipertrofia#volumen", CENTINELA]
+    dias[0].ejercicios[0].fuentes = ["progresion#volumen", CENTINELA]
     llm = LLMFalso(estructuradas={
         "AnalisisMensaje": [AnalisisMensaje()],
         "DecisionSupervisor": [DecisionSupervisor(destino=destino)],
@@ -146,7 +146,7 @@ async def test_la_rutina_formateada_no_contiene_texto_del_llm(settings, destino)
     r = await grafo.ainvoke({"usuario_id": usuario, "mensaje": "dame una rutina"}, config_hilo(usuario))
     assert r["plan_validado"] is True
     assert "CENTINELA" not in r["respuesta"]
-    assert "guia_hipertrofia#volumen" in r["respuesta"]  # la fuente con forma de id se muestra
+    assert "guia:progresion" in r["respuesta"]  # solo fuentes canonicas de guias reales
     assert "hipertrofia" in r["respuesta"] and "intermedio" in r["respuesta"]
     if destino == "progreso":
         assert "entrenos registrados" in r["respuesta"]

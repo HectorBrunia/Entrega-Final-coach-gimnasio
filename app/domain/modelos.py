@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from datetime import date
 from enum import Enum
 from typing import Literal
@@ -6,6 +8,37 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from app.domain.equipo import normalizar_equipo
+
+
+# Campos de la rutina que se muestran literalmente al usuario: forma estricta. La propuesta del
+# LLM que no la cumpla no valida (el plan se rechaza); al mostrar una rutina ya guardada se
+# sanea igual (ver app.agentes.nodos).
+_REPETICIONES = re.compile(r"^\d{1,2}(?:-\d{1,2})?$")
+MAX_NOMBRE_DIA = 40
+_NOMBRE_DIA_PROHIBIDO = re.compile(
+    r"^\s*(?:[-*•·>]|\d+\s*[.)])"                                   # marca de lista
+    r"|\d+\s*(?:kg|kilos?|lbs?|x|×|series|sets?|reps?|repeticiones|tandas?|por\s*\d)"
+    r"|\b(?:haz|hazlo|anade|agrega|incluye|realiza|ademas|tambien|luego|despues)\b"
+)
+
+
+def _sin_tildes(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in texto if not unicodedata.combining(c)).lower()
+
+
+def repeticiones_validas(valor: str) -> bool:
+    """Repeticiones de un ejercicio planificado: un numero o un rango "N-M" (1-2 cifras)."""
+    return bool(_REPETICIONES.match(valor or ""))
+
+
+def nombre_dia_valido(nombre: str) -> bool:
+    """Nombre de dia corto (<= MAX_NOMBRE_DIA), de una linea, sin marcas de lista, cargas,
+    series o indicaciones ("Dia 1: ademas haz press militar 5x5" no vale)."""
+    nombre = nombre or ""
+    if not nombre.strip() or len(nombre) > MAX_NOMBRE_DIA or "\n" in nombre or "\r" in nombre:
+        return False
+    return not _NOMBRE_DIA_PROHIBIDO.search(_sin_tildes(nombre))
 
 
 class Nivel(str, Enum):

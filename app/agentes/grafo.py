@@ -17,7 +17,7 @@ from app.domain.modelos import Ejercicio
 from app.herramientas.funciones import buscar_conocimiento
 from app.llm import crear_llm
 from app.persistencia.repositorios import RepositorioDominio
-from app.rag.ingesta import Documento
+from app.rag.ingesta import Documento, fuentes_de_guias
 from app.rag.recuperador import FiltrosBusqueda
 from app.safety.reglas import indice_bloqueo
 from app.settings import Settings
@@ -70,7 +70,8 @@ async def construir_grafo(
 
     # indice zona -> ids bloqueados: se calcula una vez y fuera del event loop (CPU)
     indice = await asyncio.to_thread(indice_bloqueo, catalogo)
-    nodos = Nodos(repo, catalogo, llm, buscador, indice)
+    fuentes_guia = await asyncio.to_thread(fuentes_de_guias, settings.guias_dir)
+    nodos = Nodos(repo, catalogo, llm, buscador, indice, fuentes_guia=fuentes_guia)
     g = StateGraph(EstadoCoach)
     g.add_node("evaluador", nodos.evaluador)
     g.add_node("supervisor", nodos.supervisor)

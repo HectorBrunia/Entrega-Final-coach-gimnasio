@@ -5,9 +5,12 @@ from uuid import UUID
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.domain.modelos import DiaRutina, Lesion, Nivel, Perfil, PerfilBorrador, Rutina
+from app.domain.modelos import (
+    DiaRutina, EjercicioPlanificado, Lesion, Nivel, Perfil, PerfilBorrador, Rutina,
+    nombre_dia_valido, repeticiones_validas,
+)
 from app.safety.reglas import REGLAS_LESION
 
 Destino = Literal["programador", "progreso", "seguridad", "sintesis", "hitl"]
@@ -153,8 +156,37 @@ class DecisionSupervisor(BaseModel):
     motivo: str = ""
 
 
-class PlanPropuesto(BaseModel):
-    """Salida estructurada del programador y del agente de progreso."""
+class EjercicioPropuesto(EjercicioPlanificado):
+    """Ejercicio propuesto por el LLM: repeticiones con forma estricta ("8" o "8-10")."""
 
-    dias: list[DiaRutina]
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("repeticiones")
+    @classmethod
+    def _repeticiones(cls, valor: str) -> str:
+        if not repeticiones_validas(valor):
+            raise ValueError("repeticiones debe ser un numero o un rango N-M (p. ej. 8-10)")
+        return valor
+
+
+class DiaPropuesto(DiaRutina):
+    """Dia propuesto por el LLM: nombre corto y sin indicaciones; ejercicios estrictos."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ejercicios: list[EjercicioPropuesto]
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre(cls, valor: str) -> str:
+        if not nombre_dia_valido(valor):
+            raise ValueError("nombre de dia invalido (corto, una linea, sin series, cargas ni indicaciones)")
+        return valor
+
+
+class PlanPropuesto(BaseModel):
+    """Salida estructurada del programador y del agente de progreso. Un campo con forma
+    invalida hace que la propuesta no valide: el plan se rechaza y nunca se muestra."""
+
+    dias: list[DiaPropuesto]
     # Sin explicacion en texto libre: la respuesta con la rutina es determinista (spec 7).
