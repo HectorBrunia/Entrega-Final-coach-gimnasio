@@ -43,6 +43,20 @@ SINONIMOS_EQUIPO: dict[str, tuple[str, ...]] = {
 }
 
 
+# Nombre en español de cada valor canonico (para mostrar al usuario lo que ya se sabe).
+NOMBRES_EQUIPO: dict[str, str] = {
+    "barbell": "barra", "dumbbell": "mancuernas", "machine": "máquinas", "cable": "poleas",
+    "kettlebells": "pesas rusas", "bands": "bandas elásticas", "medicine ball": "balón medicinal",
+    "exercise ball": "fitball", "foam roll": "rodillo de espuma", "e-z curl bar": "barra Z",
+    "other": "otro", "cuerpo": "peso corporal",
+}
+
+
+def describir_equipo(equipo: list[str]) -> str:
+    """Equipo canonico en español, separado por comas."""
+    return ", ".join(NOMBRES_EQUIPO.get(e, e) for e in equipo)
+
+
 def _clave(texto: str) -> str:
     sin_tildes = unicodedata.normalize("NFKD", texto)
     sin_tildes = "".join(c for c in sin_tildes if not unicodedata.combining(c))

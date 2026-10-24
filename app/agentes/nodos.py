@@ -24,8 +24,8 @@ from app.agentes.estado import (
     LesionReportada,
     PlanPropuesto,
 )
-from app.domain.equipo import EQUIPO_SIEMPRE_DISPONIBLE
-from app.domain.modelos import DiaRutina, Ejercicio, Lesion, Perfil, Rutina
+from app.domain.equipo import EQUIPO_SIEMPRE_DISPONIBLE, describir_equipo, normalizar_equipo
+from app.domain.modelos import DiaRutina, Ejercicio, Lesion, Perfil, PerfilBorrador, Rutina
 from app.herramientas.esquemas import EntradaVolumen
 from app.herramientas.funciones import (
     EjercicioDesconocido,
@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 Buscador = Callable[[str, FiltrosBusqueda], Awaitable[list[Documento]]]
 
 AVISO_MEDICO = "Esto no es un diagnóstico médico."
+# Cualquier copia del aviso (con o sin tildes, mayusculas o punto) que traiga un texto: el LLM
+# lo copia del historial. Se quita antes de anadir el unico aviso final.
+_AVISO_EXISTENTE = re.compile(r"\s*esto no es un diagn[oó]stico m[eé]dico\.?", re.IGNORECASE)
 
 # Triaje de urgencia cardiaca en tres niveles (regla K). Todo sobre el mensaje ACTUAL
 # normalizado (sin tildes ni mayusculas).
@@ -220,6 +223,41 @@ MSG_SIN_PLAN_SEGURO = (
     "a un profesional (médico, fisioterapeuta o entrenador certificado) antes de continuar."
 )
 MSG_FALLO_PLAN = "No pude generar un plan en este momento. Inténtalo de nuevo en unos minutos."
+# Spec 7: solo el camino programador -> seguridad entrega rutinas. Si el texto libre de la
+# sintesis parece una prescripcion, se sustituye por uno de estos mensajes fijos.
+MSG_PIDE_RUTINA = (
+    "Las rutinas te las preparo solo con ejercicios de mi catálogo y revisadas por mi filtro "
+    "de seguridad. Si quieres un plan, escríbeme \"dame una rutina\" y te lo armo."
+)
+MSG_PLAN_TRAS_PERFIL = (
+    "Te prepararé el plan en cuanto tenga tu perfil completo (objetivo, días disponibles, "
+    "equipo y nivel), con ejercicios de mi catálogo revisados por mi filtro de seguridad."
+)
+
+# Datos del perfil, en el orden en que se piden: (campo, etiqueta para el usuario, ayuda).
+CAMPOS_PERFIL: tuple[tuple[str, str, str], ...] = (
+    ("objetivo", "objetivo", "p. ej. fuerza, hipertrofia o perder grasa"),
+    ("dias_disponibles", "días disponibles", "cuántos días por semana puedes entrenar"),
+    ("equipo", "equipo", "p. ej. barra, mancuernas, máquinas, poleas o peso corporal"),
+    ("nivel", "nivel", "principiante, intermedio o avanzado"),
+)
+
+# Senales de que un texto libre prescribe entrenamiento (sobre cada linea normalizada).
+_PRESCRIPCION = re.compile(
+    r"\b\d+\s*(?:x|×|series?(?:\s*(?:x|×|de))?)\s*\d+"  # 4x10, 3 x 8, 3 series x 8, 3 series de 12
+    r"|\brepeticion(?:es)?\b|\breps?\b|\bseries de\b"
+)
+_ENCABEZADO_DIA = re.compile(r"^[\W_]*(?:dia|day|sesion)\s*\d+\b")
+_VINETA = re.compile(r"^\s*(?:[-*•·]|\d+\s*[.)-])\s*\S")
+_NOMBRE_EJERCICIO = re.compile(
+    r"\b(?:press|sentadill\w*|squat\w*|peso muerto|deadlift\w*|remo\w*|rows?|dominad\w*|"
+    r"pull ?ups?|chin ?ups?|jalon\w*|curl\w*|extension\w*|zancad\w*|lunges?|hip thrust|"
+    r"fondos|dips?|elevacion\w*|aperturas?|flexion\w*|push ?ups?|plancha\w*|planks?|prensa|"
+    r"gemelos?|triceps|biceps|burpees?|crunch\w*|abdominal\w*|face ?pull|swing\w*|"
+    r"thrusters?|kettlebell|step ?ups?)\b"
+)
+MIN_VINETAS_EJERCICIO = 3
+
 MSG_RESPUESTA_INSEGURA = (
     "Prefiero no responder a eso con recomendaciones concretas porque podrían no ser seguras "
     "con tus lesiones o molestias actuales. Si quieres, puedo armarte una rutina validada."
@@ -411,7 +449,37 @@ def _quitar_ejercicios(rutina: Rutina, quitar: set[str]) -> Rutina:
 
 
 def _con_aviso(texto: str) -> str:
-    return f"{texto.rstrip()}\n\n{AVISO_MEDICO}"
+    """Anade el aviso medico exactamente una vez, al final (quita las copias que ya traiga)."""
+    return f"{_AVISO_EXISTENTE.sub('', texto).rstrip()}\n\n{AVISO_MEDICO}"
+
+
+def parece_prescripcion(texto: str) -> bool:
+    """Guarda determinista sobre el texto libre: True si parece un plan o una prescripcion
+    (series x repeticiones, "repeticiones"/"reps"/"series de", encabezados "Día 1"/"Day 1"
+    o 3+ lineas de lista que nombran ejercicios). Criterio amplio a proposito: ante la duda,
+    el texto se sustituye por un mensaje fijo."""
+    lineas = [_normalizar(l) for l in texto.splitlines()]
+    if any(_PRESCRIPCION.search(l) or _ENCABEZADO_DIA.search(l) for l in lineas):
+        return True
+    vinetas = [l for l in lineas if _VINETA.match(l) and _NOMBRE_EJERCICIO.search(l)]
+    return len(vinetas) >= MIN_VINETAS_EJERCICIO
+
+
+def texto_perfil_incompleto(borrador: PerfilBorrador | None) -> str:
+    """Plantilla fija (sin LLM) para un perfil incompleto: lo que ya se sabe y lo que falta."""
+    datos = {k: v for k, v in (borrador or PerfilBorrador()) if v not in (None, [], "")}
+    if "equipo" in datos:
+        datos["equipo"] = describir_equipo(datos["equipo"])
+    if "nivel" in datos:
+        datos["nivel"] = datos["nivel"].value
+    sabidos = [f"- {etiqueta}: {datos[campo]}" for campo, etiqueta, _ in CAMPOS_PERFIL if campo in datos]
+    faltan = [f"- {etiqueta} ({ayuda})" for campo, etiqueta, ayuda in CAMPOS_PERFIL if campo not in datos]
+    lineas = ["Para prepararte una rutina segura necesito completar tu perfil."]
+    if sabidos:
+        lineas += ["", "Lo que ya sé:", *sabidos]
+    lineas += ["", "Me falta saber:", *faltan, "",
+               "Cuando me lo digas, te preparo la rutina con ejercicios de mi catálogo."]
+    return "\n".join(lineas)
 
 
 def texto_pausa(motivo: str | None) -> str:
@@ -520,6 +588,8 @@ class Nodos:
         uid: UUID = estado["usuario_id"]
         mensaje = estado["mensaje"]
         perfil = await self.repo.obtener_perfil(uid)
+        # borrador del onboarding (Postgres): solo mientras no hay perfil completo
+        borrador = None if perfil else await self.repo.obtener_perfil_borrador(uid)
         rutina = await self.repo.rutina_actual(uid)
         previas = await self.repo.lesiones_activas(uid)
         dolor_por_palabra = detectar_dolor_agudo(mensaje)
@@ -535,7 +605,7 @@ class Nodos:
             logger.warning("Fallo el LLM del evaluador; se escala a humano por palabra clave de dolor")
         analisis = analisis or AnalisisMensaje()
 
-        perfil = await self._actualizar_perfil(uid, perfil, analisis)
+        perfil, borrador, completado = await self._actualizar_perfil(uid, perfil, borrador, analisis)
         nuevas, cambios = await self._registrar_lesiones(uid, previas, analisis.lesiones_nuevas)
         lesiones = await self.repo.lesiones_activas(uid) if (nuevas or cambios) else previas
         lesion_nueva = any(l.activa for l in nuevas)
@@ -573,6 +643,8 @@ class Nodos:
 
         return {
             "perfil": perfil,
+            "perfil_borrador": borrador,
+            "perfil_completado": completado,
             "lesiones": lesiones,
             "rutina": rutina,
             "bloqueados": [],
@@ -673,8 +745,10 @@ class Nodos:
         zonas = ", ".join([*sorted(REGLAS_LESION), *ZONAS_GENERICAS, ZONA_OTRA])
         registradas = ", ".join(sorted({l.zona for l in lesiones or []})) or "ninguna"
         sistema = (
-            "Eres el evaluador de un coach de gimnasio. Extrae SOLO del ultimo mensaje del "
-            "usuario: datos de perfil (objetivo, dias_disponibles 1-7, equipo, nivel), lesiones "
+            "Eres el evaluador de un coach de gimnasio. Extrae los datos de perfil (objetivo, "
+            "dias_disponibles 1-7, equipo, nivel) del ultimo mensaje y tambien de los mensajes "
+            "recientes del historial: un dato de perfil dicho antes sigue valiendo (si cambia, "
+            "vale el mas reciente). Del ultimo mensaje del usuario extrae SOLO: lesiones "
             f"nuevas (zona, una de: {zonas}; usa hombro o rodilla si no dice el lado y otra, con "
             "descripcion, para cualquier otra zona), y si reporta dolor agudo "
             "o dolor que empeora durante un ejercicio (dolor_agudo) y en que ejercicio. "
@@ -699,23 +773,61 @@ class Nodos:
         )
         return [SystemMessage(content=sistema), *self._historial(estado), HumanMessage(content=estado["mensaje"])]
 
-    async def _actualizar_perfil(
-        self, uid: UUID, perfil: Perfil | None, analisis: AnalisisMensaje
-    ) -> Perfil | None:
+    @staticmethod
+    def _cambios_perfil(analisis: AnalisisMensaje) -> dict:
+        """Datos de perfil del analisis, limpios. El equipo se normaliza al vocabulario del
+        catalogo; si queda vacio (todo desconocido) cuenta como dato que falta."""
         parcial = analisis.perfil
         if parcial is None:
-            return perfil
-        cambios = parcial.model_dump(exclude_none=True)
+            return {}
+        cambios = {k: v for k, v in parcial if v is not None}
+        if "equipo" in cambios:
+            equipo = normalizar_equipo(cambios["equipo"])
+            if equipo:
+                cambios["equipo"] = equipo
+            else:
+                del cambios["equipo"]
+        if "objetivo" in cambios and not cambios["objetivo"].strip():
+            del cambios["objetivo"]
+        return cambios
+
+    async def _actualizar_perfil(
+        self, uid: UUID, perfil: Perfil | None, borrador: PerfilBorrador | None,
+        analisis: AnalisisMensaje,
+    ) -> tuple[Perfil | None, PerfilBorrador | None, bool]:
+        """Perfil incremental. Devuelve (perfil, borrador, completado_en_este_turno).
+
+        Con perfil completo, los datos nuevos lo actualizan. Sin el, se fusionan con el
+        borrador persistido en Postgres (los posteriores sustituyen a los anteriores): si el
+        resultado valida como `Perfil` se guarda (y el repositorio borra el borrador en la
+        misma transaccion); si no, se guarda el borrador ampliado, que sobrevive a reinicios
+        del proceso y del hilo.
+        """
+        cambios = self._cambios_perfil(analisis)
+        if perfil is not None:
+            if not cambios:
+                return perfil, None, False
+            try:
+                nuevo = Perfil.model_validate({**perfil.model_dump(), **cambios})
+            except ValueError:
+                return perfil, None, False
+            await self.repo.guardar_perfil(nuevo)
+            return nuevo, None, False
+
         if not cambios:
-            return perfil
-        base = perfil.model_dump() if perfil else {"usuario_id": uid}
-        datos = {**base, **cambios}
+            return None, borrador, False
+        previos = {k: v for k, v in (borrador or PerfilBorrador()) if v is not None}
+        datos = {**previos, **cambios}
         try:
-            nuevo = Perfil.model_validate(datos)
+            nuevo = Perfil.model_validate({"usuario_id": uid, **datos})
         except ValueError:
-            return perfil  # perfil incompleto: se pedira el resto en la respuesta
+            nuevo = None  # incompleto: se guarda el borrador y se pide el resto
+        if nuevo is None or not nuevo.equipo:
+            nuevo_borrador = PerfilBorrador.model_validate(datos)
+            await self.repo.guardar_perfil_borrador(uid, nuevo_borrador)
+            return None, nuevo_borrador, False
         await self.repo.guardar_perfil(nuevo)
-        return nuevo
+        return nuevo, None, True
 
     # --- supervisor -------------------------------------------------------------
 
@@ -742,6 +854,11 @@ class Nodos:
             destino = "programador"
         elif destino == "seguridad" and estado.get("rutina") is None:
             destino = "sintesis"
+        elif (destino == "sintesis" and estado.get("perfil_completado")
+              and estado.get("rutina") is None):
+            # el usuario acaba de terminar el onboarding y aun no tiene rutina: se programa en
+            # este mismo turno (nunca se le contesta con un plan en texto libre)
+            destino = "programador"
         return {"siguiente": destino}
 
     def _prompt_supervisor(self, estado: EstadoCoach) -> list[BaseMessage]:
@@ -752,7 +869,8 @@ class Nodos:
             "- seguridad: el usuario quiere ver o revisar su rutina actual.\n"
             "- sintesis: preguntas generales, saludos, datos que faltan o temas fuera de alcance.\n"
             "- hitl: el usuario describe una situacion medica que requiere revision humana.\n"
-            f"Perfil: {'completo' if estado.get('perfil') else 'incompleto'}. "
+            f"Perfil: {'completo' if estado.get('perfil') else 'incompleto'}"
+            f"{' (completado en este mensaje)' if estado.get('perfil_completado') else ''}. "
             f"Rutina vigente: {'si' if estado.get('rutina') else 'no'}."
         )
         return [SystemMessage(content=sistema), *self._historial(estado), HumanMessage(content=estado["mensaje"])]
@@ -949,6 +1067,9 @@ class Nodos:
                 cambios["rutina"] = None
         elif estado.get("fallo_plan"):
             texto = MSG_FALLO_PLAN
+        elif estado.get("perfil") is None:
+            # sin perfil completo no hay LLM de texto libre: plantilla fija con lo que falta
+            texto = texto_perfil_incompleto(estado.get("perfil_borrador"))
         else:
             texto = await self._conversar(estado)
         texto = _con_aviso(texto)
@@ -991,6 +1112,25 @@ class Nodos:
             lineas.append(f"\nFuentes: {', '.join(fuentes)}")
         return "\n".join(lineas)
 
+    def _prompt_conversar(self, estado: EstadoCoach, prohibidos: set[str]) -> list[BaseMessage]:
+        lesiones = estado.get("lesiones") or []
+        perfil = estado.get("perfil")
+        sistema = (
+            "Eres un coach de gimnasio. Responde en español, breve y sin inventar. Si la pregunta "
+            "esta fuera del entrenamiento, rechaza con cortesia. Si falta el perfil, pide objetivo, "
+            "dias disponibles, equipo y nivel. No des diagnosticos medicos ni anadas avisos "
+            "medicos: el sistema los anade.\n"
+            "Nunca prescribas ejercicios, series, repeticiones, cargas, rutinas ni planes de "
+            "entrenamiento, ni siquiera de ejemplo: las rutinas solo las genera el programador "
+            "validado. Si el usuario quiere un plan, dile que lo pida escribiendo \"dame una "
+            "rutina\".\n"
+            f"Perfil: {perfil.model_dump_json() if perfil else 'incompleto'}.\n"
+            f"Lesiones activas: {', '.join(l.zona for l in lesiones) or 'ninguna'}.\n"
+            f"Nunca recomiendes: {', '.join(sorted(prohibidos)) or 'nada en particular'}."
+        )
+        return [SystemMessage(content=sistema), *self._historial(estado),
+                HumanMessage(content=estado["mensaje"])]
+
     async def _conversar(self, estado: EstadoCoach) -> str:
         lesiones = estado.get("lesiones") or []
         excluidos = estado.get("ejercicios_excluidos") or []
@@ -998,20 +1138,13 @@ class Nodos:
             prohibidos = self._prohibidos(lesiones, excluidos)
         except ZonaLesionDesconocida:
             return MSG_RESPUESTA_INSEGURA
-        perfil = estado.get("perfil")
-        sistema = (
-            "Eres un coach de gimnasio. Responde en español, breve y sin inventar. Si la pregunta "
-            "esta fuera del entrenamiento, rechaza con cortesia. Si falta el perfil, pide objetivo, "
-            "dias disponibles, equipo y nivel. No des diagnosticos medicos.\n"
-            f"Perfil: {perfil.model_dump_json() if perfil else 'incompleto'}.\n"
-            f"Lesiones activas: {', '.join(l.zona for l in lesiones) or 'ninguna'}.\n"
-            f"Nunca recomiendes: {', '.join(sorted(prohibidos)) or 'nada en particular'}."
-        )
-        mensajes = [SystemMessage(content=sistema), *self._historial(estado),
-                    HumanMessage(content=estado["mensaje"])]
-        respuesta = await self.llm.ainvoke(mensajes)
+        respuesta = await self.llm.ainvoke(self._prompt_conversar(estado, prohibidos))
         texto = respuesta.text if isinstance(respuesta, AIMessage) else str(respuesta.content)
-        # salvaguarda determinista: el texto libre no puede recomendar ejercicios prohibidos
+        # salvaguardas deterministas: el texto libre no puede recomendar ejercicios prohibidos
+        # ni entregar un plan (solo programador -> seguridad entrega rutinas, spec 7)
         if self._menciona(texto, prohibidos):
             return MSG_RESPUESTA_INSEGURA
+        if parece_prescripcion(texto):
+            logger.warning("Texto libre de la sintesis con forma de plan: se sustituye")
+            return MSG_PIDE_RUTINA if estado.get("perfil") else MSG_PLAN_TRAS_PERFIL
         return texto

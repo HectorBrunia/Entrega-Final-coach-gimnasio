@@ -118,9 +118,17 @@ class RepoFalso:
         self.rutinas: dict[UUID, list[Rutina]] = {}
         self.entrenos: dict[UUID, list[EntrenoRegistro]] = {}
         self.exclusiones: dict[UUID, list[str]] = {}
+        self.borradores: dict[UUID, object] = {}
 
     async def guardar_perfil(self, perfil):
         self.perfiles[perfil.usuario_id] = perfil
+        self.borradores.pop(perfil.usuario_id, None)  # el perfil completo sustituye al borrador
+
+    async def obtener_perfil_borrador(self, usuario_id):
+        return self.borradores.get(usuario_id)
+
+    async def guardar_perfil_borrador(self, usuario_id, borrador):
+        self.borradores[usuario_id] = borrador
 
     async def obtener_perfil(self, usuario_id):
         return self.perfiles.get(usuario_id)
@@ -546,7 +554,8 @@ async def test_sintesis_descarta_texto_libre_que_recomienda_un_ejercicio_bloquea
     llm = LLMFalso(textos=["Te recomiendo hacer press militar con poco peso."])
     nodos = Nodos(repo, CATALOGO, llm, _buscador_falso)
     salida = await nodos.sintesis({
-        "usuario_id": usuario, "mensaje": "¿que hago para hombros?",
+        # con perfil: sin el, la sintesis responde con la plantilla fija y no llama al LLM
+        "usuario_id": usuario, "mensaje": "¿que hago para hombros?", "perfil": repo.perfiles[usuario],
         "lesiones": [Lesion(zona="hombro_derecho", severidad="leve", activa=True)],
     })
     assert "press militar" not in salida["respuesta"]

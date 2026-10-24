@@ -7,7 +7,7 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.modelos import DiaRutina, Lesion, Nivel, Perfil, Rutina
+from app.domain.modelos import DiaRutina, Lesion, Nivel, Perfil, PerfilBorrador, Rutina
 from app.safety.reglas import REGLAS_LESION
 
 Destino = Literal["programador", "progreso", "seguridad", "sintesis", "hitl"]
@@ -19,6 +19,8 @@ class EstadoCoach(TypedDict, total=False):
     mensaje: str
     # Datos de dominio (Postgres es la fuente de verdad; se recargan en cada turno)
     perfil: Perfil | None
+    perfil_borrador: PerfilBorrador | None  # datos parciales mientras el perfil no esta completo
+    perfil_completado: bool  # el perfil se completo en este turno (onboarding terminado)
     lesiones: list[Lesion]
     rutina: Rutina | None
     # Control de seguridad del turno
@@ -79,7 +81,11 @@ class AnalisisMensaje(BaseModel):
     """Salida estructurada del evaluador."""
 
     perfil: PerfilParcial | None = Field(
-        default=None, description="Datos de perfil que el usuario menciona en este mensaje."
+        default=None, description=(
+            "Datos de perfil (objetivo, dias_disponibles, equipo, nivel) que el usuario da en el "
+            "mensaje actual o en los mensajes recientes de la conversacion. Si un dato cambia, "
+            "vale el mas reciente."
+        ),
     )
     lesiones_nuevas: list[LesionReportada] = Field(
         default_factory=list, description=(
