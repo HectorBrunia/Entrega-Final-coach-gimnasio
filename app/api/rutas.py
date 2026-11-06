@@ -218,7 +218,9 @@ async def rutina_actual(request: Request, usuario_id: UUID) -> RutinaSalida:
     )
     if any(p.ejercicio_id in prohibidos for d in rutina.dias for p in d.ejercicios):
         raise RutinaNoSegura()
-    return RutinaSalida(**rutina.model_dump())
+    nombres = {p.ejercicio_id: catalogo[p.ejercicio_id].nombre
+               for d in rutina.dias for p in d.ejercicios if p.ejercicio_id in catalogo}
+    return RutinaSalida(**rutina.model_dump(), nombres=nombres)
 
 
 @router.post(

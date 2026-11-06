@@ -42,6 +42,10 @@ dev = [
 # Solo el paquete de la aplicacion; scripts/, tests/, evaluacion/ y migrations/ se usan desde el repo
 include = ["app*"]
 
+[tool.setuptools.package-data]
+# Chat web estatico que sirve la API en /
+app = ["web/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

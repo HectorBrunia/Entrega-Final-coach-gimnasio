@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coach de gimnasio</title>
+  <meta name="description" content="Chat con el coach de gimnasio con IA">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <header class="cabecera">
+    <div class="cabecera__interior">
+      <h1 class="marca">Coach de gimnasio</h1>
+      <button type="button" id="nueva" class="boton-secundario">Nueva conversación</button>
+    </div>
+  </header>
+
+  <main id="conversacion" class="conversacion" aria-live="polite">
+    <section id="bienvenida" class="bienvenida">
+      <h2>¿Qué querés entrenar?</h2>
+      <p>Contame tu objetivo, cuántos días podés entrenar y qué equipo tenés. Con eso armo tu rutina y la vamos ajustando.</p>
+      <div class="sugerencias">
+        <button type="button" class="sugerencia">Quiero ganar fuerza, tengo mancuernas y puedo entrenar 3 días</button>
+        <button type="button" class="sugerencia">Soy principiante y quiero ganar masa muscular, voy 4 días al gimnasio</button>
+        <button type="button" class="sugerencia">Entreno en casa sin equipo, 2 días por semana</button>
+      </div>
+    </section>
+    <ol id="mensajes" class="mensajes"></ol>
+  </main>
+
+  <footer class="redactor">
+    <form id="formulario" class="redactor__interior">
+      <label for="entrada" class="solo-lectores">Mensaje para el coach</label>
+      <textarea id="entrada" rows="1" maxlength="4000" placeholder="Escribí tu mensaje…" autocomplete="off"></textarea>
+      <button type="submit" id="enviar" class="boton-primario">Enviar</button>
+    </form>
+    <p class="nota">El coach no reemplaza a un profesional de la salud.</p>
+  </footer>
+
+  <script src="chat.js"></script>
+</body>
+</html>

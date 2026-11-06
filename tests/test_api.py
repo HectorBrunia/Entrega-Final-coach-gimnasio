@@ -290,6 +290,34 @@ async def test_rutina_actual_existente():
 
 
 @pytest.mark.asyncio
+async def test_rutina_actual_incluye_nombres_de_ejercicios():
+    repo = RepoFalso()
+    uid = UUID(UID)
+    plan = EjercicioPlanificado(ejercicio_id="sentadilla", series=3, repeticiones="8-10",
+                                descanso_seg=90, fuentes=["catalogo"])
+    repo.rutinas[uid] = Rutina(usuario_id=uid, version=1,
+                               dias=[DiaRutina(nombre="Día 1", ejercicios=[plan])])
+    app = crear_app(grafo=GrafoFalso(), repo=repo, catalogo=_catalogo())
+    async with _cliente(app) as c:
+        r = await c.get(f"/usuarios/{UID}/rutinas/actual")
+    assert r.status_code == 200 and r.json()["nombres"] == {"sentadilla": "Sentadilla"}
+
+
+@pytest.mark.asyncio
+async def test_raiz_sirve_el_chat_web_sin_tapar_la_api():
+    app = crear_app(grafo=GrafoFalso(), repo=RepoFalso(), catalogo=_catalogo())
+    async with _cliente(app) as c:
+        raiz = await c.get("/")
+        js = await c.get("/chat.js")
+        docs = await c.get("/docs")
+        usuario = await c.post("/usuarios", json={})
+    assert raiz.status_code == 200 and "Coach de gimnasio" in raiz.text
+    assert js.status_code == 200 and "/rutinas/actual" in js.text
+    assert docs.status_code == 200 and "swagger" in docs.text.lower()
+    assert usuario.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_reanudar_invoca_el_grafo_con_command_resume():
     grafo = GrafoFalso({"respuesta": "Consulta a un profesional"}, pausado=True)
     app = crear_app(grafo=grafo, repo=RepoFalso(), catalogo=_catalogo())

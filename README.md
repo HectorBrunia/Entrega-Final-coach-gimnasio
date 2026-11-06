@@ -178,6 +178,7 @@ Al terminar:
 
 | Servicio | URL |
 |---|---|
+| Chat web | http://localhost:8000/ |
 | API (OpenAPI) | http://localhost:8000/docs |
 | Salud | http://localhost:8000/health |
 | Phoenix (trazas) | http://localhost:6006 |
@@ -197,6 +198,16 @@ El mismo `.env` sirve para el compose y para ejecutar en local: dentro del conte
 (`postgres`, `redis`, `qdrant`, `phoenix`). La variable `COACH_ENV_FILE` permite usar otro
 archivo de entorno en lugar de `.env`, y `API_PORT`, `POSTGRES_PORT`, `REDIS_PORT`,
 `QDRANT_PORT` y `PHOENIX_PORT` cambian los puertos del host.
+
+### Chat web
+
+En http://localhost:8000/ hay un chat mínimo para hablar con el coach desde el navegador
+(`app/web/`: HTML, CSS y JavaScript sin dependencias ni compilación, servido por la misma API).
+Crea el usuario automáticamente y lo recuerda en el navegador; "Nueva conversación" empieza con
+un usuario nuevo. Cuando la respuesta incluye una rutina, la muestra como tablas por día a partir
+de `GET /usuarios/{id}/rutinas/actual`, que incluye `nombres` (id del catálogo → nombre legible).
+Si el coach pausa la conversación por dolor, aparece un aviso; la reanudación sigue siendo por
+la API (`POST /hitl/{thread_id}/reanudar`).
 
 ### Ejemplo de uso
 

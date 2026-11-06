@@ -87,12 +87,15 @@ class RutinaSalida(BaseModel):
     usuario_id: UUID
     version: int
     dias: list[DiaRutina]
+    # Nombre legible de cada ejercicio_id de la rutina (lo usa el chat web para la tabla)
+    nombres: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(json_schema_extra={"examples": [
         {"usuario_id": _UID, "version": 1, "dias": [{
             "nombre": "Día 1",
             "ejercicios": [{"ejercicio_id": "sentadilla", "series": 3, "repeticiones": "8-10",
-                            "descanso_seg": 90, "fuentes": ["catalogo"]}]}]}
+                            "descanso_seg": 90, "fuentes": ["catalogo"]}]}],
+         "nombres": {"sentadilla": "Sentadilla"}}
     ]})
 
 

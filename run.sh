@@ -101,6 +101,7 @@ done
 
 echo
 echo "Coach de gimnasio listo."
+echo "  Chat web:          $API_URL/"
 echo "  API (OpenAPI):     $API_URL/docs"
 echo "  Salud:             $API_URL/health"
 echo "  Trazas (Phoenix):  http://localhost:${PHOENIX_PORT:-6006}"

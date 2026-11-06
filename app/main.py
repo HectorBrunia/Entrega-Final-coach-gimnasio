@@ -5,11 +5,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -21,6 +23,9 @@ from app.domain.modelos import Ejercicio
 from app.llm import LLMNoDisponible
 from app.safety.reglas import ReglasInvalidas, validar_reglas_contra_catalogo
 from app.settings import Settings, get_settings
+
+# Chat web minimo (HTML, CSS y JS sin dependencias) servido en / por la misma API
+DIR_WEB = Path(__file__).parent / "web"
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +254,8 @@ def crear_app(
     app.state.llm_configurado = None
     _registrar_manejadores(app)
     app.include_router(router)
+    # Se monta al final: las rutas de la API (y /docs) tienen prioridad sobre los estaticos
+    app.mount("/", StaticFiles(directory=DIR_WEB, html=True), name="web")
     return app
 
 

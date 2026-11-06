@@ -121,6 +121,7 @@ while ($true) {
 
 Write-Host ''
 Write-Host 'Coach de gimnasio listo.'
+Write-Host "  Chat web:          $apiUrl/"
 Write-Host "  API (OpenAPI):     $apiUrl/docs"
 Write-Host "  Salud:             $apiUrl/health"
 Write-Host "  Trazas (Phoenix):  http://localhost:$phoenixPort"
